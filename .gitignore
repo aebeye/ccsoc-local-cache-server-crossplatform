@@ -1,0 +1,9 @@
+content
+tmp
+log
+*.log
+.DS_Store
+Pearson Content Caching Service.pkg
+installer
+backup
+node_modules

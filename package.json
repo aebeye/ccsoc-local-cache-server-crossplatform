@@ -1,0 +1,21 @@
+{
+  "name": "ccsoc-local-cache-service",
+  "version": "0.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "~4.0.0",
+    "mkdirp": "~0.3.5",
+    "path": "~0.4.9",
+    "azure": "~0.9.3",
+    "winston": "~0.7.3",
+    "temp": "~0.7.0",
+    "mv": "~2.0.0",
+    "getmac": "~1.0.6"
+  }
+}
