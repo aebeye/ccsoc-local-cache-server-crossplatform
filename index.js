@@ -19,9 +19,9 @@ var config = require(__dirname + '/config.js')
   , contentDirectory = path.join(__dirname, "content");
 
 /* Global variables */
-var downloadsRunning = []
-  , contentSyncActive = false
-  , downloadQueue = [];
+var downloadsRunning = [] // array of currently downloading blobs
+  , contentSyncActive = false // set to true when a full content sync is underway as a means to stop the web server from handling requests during this time
+  , downloadQueue = []; // downloads that are not yet running, but queued to be when their time comes
 
 // compares two 'download info' queue objects against each other based on the blob name and container name
 function compareBlobs(inputBlob) {
@@ -31,7 +31,7 @@ function compareBlobsN(inputBlob) { // negated
 	return inputBlob.blobName != this.blobName || inputBlob.blobContainerName != this.blobContainerName;
 }
 
-// Logging function
+// Logging function for HTTP requests
 function logWebRequest(req, res){
 	var success = (res.statusCode === 200 || res.statusCode === 304 || res.statusCode === 206) ? 'SUCCESS' : 'FAIL'
 	  , contentLengthBytes = parseInt(res.get('content-length') || 0, 10)
@@ -131,19 +131,21 @@ function startWebServer() {
     app.listen(config.port);
 }
 
-/* Functions related to Azure (specifically blob storage) */
+/* Get a handle to the Azure blob service */
 function getBlobService() {
     var connectionString;
     connectionString = "DefaultEndpointsProtocol=https;AccountName=" + config.storageAccountName + ";AccountKey=" + config.storageAccountSecret;
     return azure.createBlobService(connectionString).withFilter(new azure.ExponentialRetryPolicyFilter());
 }
 
+// Calculate the base64 encoded MD5 hash of the file given (for validation against azure)
 function md5(filename) {
   var sum = crypto.createHash('md5');
   sum.update(fs.readFileSync(filename));
   return sum.digest('base64');
 }
 
+// Continuous processing of the download queue
 function downloadNextBlob() {
 	// queue the next download check call
 	setImmediate(downloadNextBlob);
@@ -151,6 +153,7 @@ function downloadNextBlob() {
     if (downloadQueue.length > 0 && downloadsRunning.length < config.concurrentDownloads) {
         downloadInfo = downloadQueue.shift();
         downloadsRunning.push(downloadInfo);
+		// define callbacks for the various cases resulting from downloading this blob
         downloadComplete = function () {
             downloadsRunning = u.filter(downloadsRunning,compareBlobsN,downloadInfo);
 			// when the download queue has been emptied, we are no longer syncing content
@@ -163,6 +166,7 @@ function downloadNextBlob() {
 			downloadQueue.push(downloadInfo);
 			return downloadComplete();
         };
+		// Get a temporary path into which we can download our blob
         tempFilename = temp.path();
         blobService = getBlobService();
         return blobService.getBlobProperties(downloadInfo.blobContainerName, downloadInfo.blobName, function (error, blobProperties, response) {
@@ -186,6 +190,7 @@ function downloadNextBlob() {
                 }
             }
 			else {
+				// fetch the URL to the blob as per the access policy
                 sharedAccessPolicy = {
                     AccessPolicy: {
                         Permissions: azure.Constants.BlobConstants.SharedAccessPermissions.READ,
@@ -198,6 +203,7 @@ function downloadNextBlob() {
 					downloadInfo.res.redirect(blobUrl);
 					logWebRequest(downloadInfo.req,downloadInfo.res);
 				}
+				// begin the download for this blob into the temporary directory
 				logger.verbose("downloading " + blobUrl + " (" + blobProperties.contentLength + ") to " + tempFilename);
                 tempStream = fs.createWriteStream(tempFilename);
                 startedAt = (new Date()).getTime();
@@ -222,7 +228,7 @@ function downloadNextBlob() {
                             logger.error("downloaded file not found");
                             return restartDownload();
                         } else {
-                            var hash = md5(tempFilename);
+							// if the file doesn't have an associated MD5 hash from Azure against which to validate, we must fall back to validating via the filesize
 							if (!blobProperties.contentMD5) {
 								logger.warn("File doesn't have an md5 hash to verify.  Falling back to size check.", {
 									noSeer: true
@@ -236,6 +242,7 @@ function downloadNextBlob() {
 										}
 										return fs.unlink(tempFilename);
 									} else {
+										// validation succeeded via file size, move the file into its final destination on disk
 										logger.info("Download complete and verified by size. " + downloadInfo.destinationFilename + " in " + ((finishedAt - startedAt) / 1000) + "s");
 										mkdirp(path.dirname(downloadInfo.destinationFilename));
 										return fs.rename(tempFilename, downloadInfo.destinationFilename, function (error) {
@@ -247,26 +254,33 @@ function downloadNextBlob() {
 									}
 								});
 							}
-							else if (hash !== blobProperties.contentMD5) {
-								logger.error("Hash mismatch.  Downloaded file had md5 hash: " + hash + " but expected hash was: " + blobProperties.contentMD5, {
-									noSeer: true
-								});
-								logger.error("File downloaded from: " + blobUrl + " appears to be corrupted based on md5 check.  Deleting downloaded file.", {
-									verb: 'content-sync'
-								});
-								fs.unlink(tempFilename);
-							} else {
-								logger.info("Download complete and verified with md5. " + downloadInfo.destinationFilename + " in " + ((finishedAt - startedAt) / 1000) + "s");
-								mkdirp(path.dirname(downloadInfo.destinationFilename));
-								mv(tempFilename, downloadInfo.destinationFilename, {mkdirp: true}, function (error) {
-									if (error) {
-										logger.error("renaming file: " + error, {
-											verb: 'content-sync'
-										});
-										restartDownload();
-									}
-								});
+							else {
+								// now that the file has been downloaded, we need to validate its hash
+								var hash = md5(tempFilename);
+								if (hash !== blobProperties.contentMD5) {
+									// if the validation of the MD5 hash fails, delete the local copy and log an error
+									logger.error("Hash mismatch.  Downloaded file had md5 hash: " + hash + " but expected hash was: " + blobProperties.contentMD5, {
+										noSeer: true
+									});
+									logger.error("File downloaded from: " + blobUrl + " appears to be corrupted based on md5 check.  Deleting downloaded file.", {
+										verb: 'content-sync'
+									});
+									fs.unlink(tempFilename);
+								} else {
+									// validation succeeded via MD5, move the file to its final destination on disk
+									logger.info("Download complete and verified with md5. " + downloadInfo.destinationFilename + " in " + ((finishedAt - startedAt) / 1000) + "s");
+									mkdirp(path.dirname(downloadInfo.destinationFilename));
+									mv(tempFilename, downloadInfo.destinationFilename, {mkdirp: true}, function (error) {
+										if (error) {
+											logger.error("renaming file: " + error, {
+												verb: 'content-sync'
+											});
+											restartDownload();
+										}
+									});
+								}
 							}
+							// callback to let the application know this file is done downloading
 							downloadComplete();
                         }
                     });
@@ -351,7 +365,7 @@ function syncPackages() {
 
 function startBroadcast() {
 	var bonjourServiceType = '_ccsoc-'+config.environmentIdentifier.toLowerCase()+'._tcp';
-	logger.info("Starting bonjour broadcast for service "+bonjourServiceType);
+	logger.info("Starting zeroconf (bonjour) broadcast for service "+bonjourServiceType);
 	// dns-sd is part of the Apple Bonjour SDK (available for windows and mac)
 	// the -R option registers a service
 	// dns-sd -R <Name> <Type> <Domain> <Port> [<TXT>...] (Register a service)
@@ -367,7 +381,7 @@ function startBroadcast() {
 		txtRecord = "";
 	}
 	exec('dns-sd -R "CCSoC Cache Server" '+bonjourServiceType+' local '+config.port + " "+txtRecord, function(error, stdout, stderr) {
-		logger.error("dns-sd (bonjour) stopped; ", {out: stdout, err: stderr});
+		logger.error("Zeroconf (bonjour) stopped; will attempt to restart it after a brief timeout", {out: stdout, err: stderr});
 		// try to restart the broadcast in a little while if it stops for any reason
 		setTimeout(startBroadcast,10000);
 	});
@@ -376,19 +390,25 @@ function startBroadcast() {
 /* Start the application */
 logger.info("CCSoC Caching Server %s starting...",packageinfo.version);
 process.title = 'Pearson Caching Service';
+// Create the content directory
 mkdirp(contentDirectory, function (error) {
     if (error) {
 		logger.error("CRITICAL: Failed to create content directory: "+error);
 		process.exit(-1);
 	}
+	// Start listening for client requests
     startWebServer();
+	// Enable syncing if config allows it
 	if(config.syncInterval > 0) {
 		syncPackages();
 		setInterval(syncPackages,config.syncInterval);
 	}
-	else logger.warn("Not starting sync process because of config flag");
+	else {
+		logger.warn("Not starting sync process because of config flag");
+	}
 	// start processing the download queue
 	setImmediate(downloadNextBlob);
+	// Start broadcasting zeroconf signal if enabled in config
 	if(config.enableBroadcast) {
 		startBroadcast();
 	} else {
