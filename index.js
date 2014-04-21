@@ -19,12 +19,22 @@ var config = require(__dirname + '/config.js')
   , contentDirectory = path.join(__dirname, "content");
 
 /* Global variables */
-var downloadsRunning = 0
+var downloadsRunning = []
+  , contentSyncActive = false
   , downloadQueue = [];
-  
+
+// compares two 'download info' queue objects against each other based on the blob name and container name
+function compareBlobs(inputBlob) {
+	return inputBlob.blobName == this.blobName && inputBlob.blobContainerName == this.blobContainerName;
+}
 /* Configures and starts the web server for hosting content */
 // Example URL: http://localhost:8888/half/00000000-0000-0000-0000-000000000000/grade10-ela-mastercontent/grade10_ela_unit5_lesson7_task3_step1.html
 function startWebServer() {
+	// During a content sync, the service should not be accessible
+	app.use(function(req, res, next){
+		if(!contentSyncActive) return next();
+		res.send(503,"Service unavailable during content sync");
+	});
 	// TODO Implement the key functionality of this logger
 	app.use(function(req, res, next){
 		//logger.format('ccsoc', ':success :remote-addr - :method :url :status :res[content-length] bytes - :response-time ms - :bandwidth kbps');
@@ -36,7 +46,7 @@ function startWebServer() {
         res.send({
 			'status': 'OK',
 			'downloadQueueSize': downloadQueue.length,
-			'downloadsRunning': downloadsRunning
+			'downloadsRunning': downloadsRunning.length
 		});
     });
 	app.use('/', express.static(contentDirectory));
@@ -59,17 +69,28 @@ function startWebServer() {
 		}
 		// the rest of the path is the blob name
 		var blobName = pathArray.join("/");
-		downloadQueue.push({
+		// create the object used to compare or put into download queue
+		var dqInfo = {
 			'destinationFilename': path.join(contentDirectory,blobContainerName,blobName),
 			'blobContainerName': blobContainerName,
 			'blobName': blobName,
 			'onDemand': true,
 			'req' : req,
 			'res' : res
-		});
-		logger.info("Added on-demand download request for "+blobContainerName+"/"+blobName);
-		// TODO Ensure that the on-demand download doesn't already exist in the queue for another user
-		// TODO Possibly instead of doing the redirect later, do the redirect instantly but to the azure server directly
+		};
+		// if this file is NOT (already in queue to be downloaded, or is currently downloading)
+		if(!(u.some(downloadQueue,compareBlobs,dqInfo) || u.some(downloadsRunning,compareBlobs,dqInfo))) {
+			// then add the file to the queue
+			downloadQueue.push(dqInfo);
+			logger.verbose("Added on-demand download request for "+blobContainerName+"/.../"+u.last(blobName.split('/')));
+			if(!config.onDemandRedirectToAzure) {
+				res.send(404,"Not Found; Queued for download");
+			}
+		} else {
+			// if the download is already in queue, just send a 404 because we don't have the content yet
+			// the client will fall back to getting the piece from azure anyway
+			res.send(404,"Not Found; In queue for download but not ready yet");
+		}
 	});
     app.listen(config.port);
 }
@@ -91,22 +112,17 @@ function downloadNextBlob() {
 	// queue the next download check call
 	setImmediate(downloadNextBlob);
     var downloadComplete, downloadInfo, restartDownload, tempFilename;
-    if (downloadQueue.length > 0 && downloadsRunning < config.concurrentDownloads) {
+    if (downloadQueue.length > 0 && downloadsRunning.length < config.concurrentDownloads) {
         downloadInfo = downloadQueue.shift();
-        downloadsRunning += 1;
+        downloadsRunning.push(downloadInfo);
         downloadComplete = function () {
-            downloadsRunning -= 1;
+            downloadsRunning = u.filter(downloadsRunning,compareBlob,downloadInfo);
+			// when the download queue has been emptied, we are no longer syncing content
+			if(downloadQueue.length < 1) contentSyncActive = false;
             return downloadNextBlob();
         };
         restartDownload = function () {
-			if(downloadInfo.onDemand) {
-				downloadInfo.res.send(404,"Not Found; On-Demand Failed");
-				delete downloadInfo.onDemand;
-				delete downloadInfo.req;
-				delete downloadInfo.res;
-			} else {
-				downloadQueue.push(downloadInfo);
-			}
+			downloadQueue.push(downloadInfo);
 			return downloadComplete();
         };
         tempFilename = temp.path();
@@ -114,16 +130,24 @@ function downloadNextBlob() {
         return blobService.getBlobProperties(downloadInfo.blobContainerName, downloadInfo.blobName, function (error, blobProperties, response) {
             var blobUrl, r, sharedAccessPolicy, startedAt, tempStream;
             if (error) {
-                restartDownload();
+				// if we encountered an error at this stage for an on-demand download, it's probably a malicious or malformed request. We do not want to
+				// reschedule it so we just send a 404 and call it complete
+                if(downloadInfo.onDemand) {
+					downloadInfo.res.send(404,"Not Found; On-Demand Failed");
+					downloadComplete();
+				}
+				// for non-on-demand downloads we want to push this request back into the queue
+				else {
+					restartDownload();
+				}
                 if (error) {
                     return logger.error("getting blob properties for "+downloadInfo.blobContainerName+"/"+downloadInfo.blobName+": " + error, {
                         noSeer: true,
-						onDemand: downloadInfo.onDemand
+						onDemand: !u.isUndefined(downloadInfo.onDemand) && downloadInfo.onDemand
                     });
                 }
             }
 			else {
-                logger.info("downloading: " + downloadInfo.blobContainerName + "/" + downloadInfo.blobName + " (" + blobProperties.contentLength + ") to " + tempFilename);
                 sharedAccessPolicy = {
                     AccessPolicy: {
                         Permissions: azure.Constants.BlobConstants.SharedAccessPermissions.READ,
@@ -132,11 +156,10 @@ function downloadNextBlob() {
                 };
                 blobUrl = blobService.getBlobUrl(downloadInfo.blobContainerName, downloadInfo.blobName, sharedAccessPolicy);
 				// if on-demand download, redirect the client to the azure URL
-				logger.info("redirecting on-demand client to azure: "+blobUrl);
-				if(downloadInfo.onDemand) {
+				if(downloadInfo.onDemand && config.onDemandRedirectToAzure) {
 					downloadInfo.res.redirect(blobUrl);
 				}
-                logger.info("url: " + blobUrl);
+				logger.verbose("downloading " + blobUrl + " (" + blobProperties.contentLength + ") to " + tempFilename);
                 tempStream = fs.createWriteStream(tempFilename);
                 startedAt = (new Date()).getTime();
                 r = request({
@@ -174,7 +197,6 @@ function downloadNextBlob() {
 										}
 										return fs.unlink(tempFilename);
 									} else {
-										logger.info("Size check of  " + downloadInfo.destinationFilename + " passed.");
 										logger.info("Download complete and verified by size. " + downloadInfo.destinationFilename + " in " + ((finishedAt - startedAt) / 1000) + "s");
 										mkdirp(path.dirname(downloadInfo.destinationFilename));
 										return fs.rename(tempFilename, downloadInfo.destinationFilename, function (error) {
@@ -207,7 +229,7 @@ function downloadNextBlob() {
 								});
 							}
 							downloadComplete();
-							return logger.info("current downloads: " + downloadsRunning);
+							return logger.verbose("current downloads: " + downloadsRunning.length);
                         }
                     });
                 });
@@ -268,23 +290,20 @@ function getBlobs(blobService, blobContainer) {
 };
 
 function syncPackages() {
-	// TODO Disable content serving while sync is running; log this request and send the following
-	/*
-		response.writeHead(404, {
-			'Content-Length': Buffer.byteLength("Requests not served during content synch"),
-			'Content-Type': 'text/plain'
-		  });
-	*/
 	var blobService = getBlobService();
-    if (!downloadsRunning.length && !downloadQueue.length && (config.syncHours.length === 0 || config.syncHours.indexOf((new Date()).getHours()) > -1)) {
+	// only run sync when there are no active NON-ON-DEMAND downloads
+	var nonOnDemandDownloads = u.filter(downloadQueue,function(x) { return !x.onDemand }).length;
+    if (!nonOnDemandDownloads.length && (config.syncHours.length === 0 || config.syncHours.indexOf((new Date()).getHours()) > -1)) {
         logger.info('running syncPackages');
         return blobService.listContainers(function (error, blobContainers, nextMarker) {
             var blobContainer, results;
             if (error) {
-                logger.error("listing containers: " + error, {
+                return logger.error("listing containers: " + error, {
                     verb: 'content-sync'
                 });
             }
+			// mark content sync as being active; thereby making content downloads unavailable
+			contentSyncActive = true;
 			for(var i=0;i < blobContainers.length; i++) {
 				getBlobs(blobService, blobContainers[i]);
 			}
@@ -317,6 +336,7 @@ function startBroadcast() {
 }
 
 /* Start the application */
+process.title = 'Pearson Caching Service';
 mkdirp(contentDirectory, function (error) {
     if (error) {
 		logger.error("CRITICAL: Failed to create content directory: "+error);

@@ -17,7 +17,7 @@ module.exports = {
 	/* syncInterval (int) : REQUIRED
 	 * This is the number of milliseconds between sync attempts for Azure content.
 	 * A value of 0 disables sync */
-	"syncInterval" : 0, // prod value is 1800000 (~20 days)
+	"syncInterval" : 0, // prod value is 1800000 milliseconds (30 mins)
 	/* syncHours ([int]) : REQUIRED
 	 * This is the hours of the day (in 24 hour time; 0 being midnight) when to perform content syncs. If omitted or
 	 * empty, the sync will not care what hour it is and continue anyway. */
@@ -41,9 +41,14 @@ module.exports = {
 	 * If set to true, when a user requests content that the caching server does not have, the caching server will attempt
 	 * to fetch that content from Azure in realtime and send it back to the user. This functionality is currently in BETA. */
 	"allowOnDemand" : true,
+	/* onDemandRedirectToAzure (boolean) : REQUIRED
+	 * When true this will send a redirect response to to the azure blob URL instead of a 404 when the caching server doesn't have a file. */
+	"onDemandRedirectToAzure" : false,
+	/* enableBroadcast (boolean) : REQUIRED
+	 * When set to 'true' the bonjour piece will broadcast the availability of the caching server to the network. */
+	"enableBroadcast" : false,
 	/* broadcastDetails (boolean) : REQUIRED
 	 * The network broadcast for Bonjour (dns-sd) allows the ability to add a TXT record with additional details. Setting
 	 * this to true will broadcast the server's caching software version, as well as what OS it is running on. */
-	"enableBroadcast" : false,
 	"broadcastDetails" : true
 };
