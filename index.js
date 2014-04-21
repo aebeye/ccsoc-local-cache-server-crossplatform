@@ -27,18 +27,25 @@ var downloadsRunning = []
 function compareBlobs(inputBlob) {
 	return inputBlob.blobName == this.blobName && inputBlob.blobContainerName == this.blobContainerName;
 }
+function compareBlobsN(inputBlob) { // negated
+	return inputBlob.blobName != this.blobName || inputBlob.blobContainerName != this.blobContainerName;
+}
+
+// Logging function
+function logWebRequest(req, res){
+	var success = (res.statusCode === 200 || res.statusCode === 304 || res.statusCode === 206) ? 'SUCCESS' : 'FAIL'
+	  , contentLengthBytes = parseInt(res.get('content-length') || 0, 10)
+	  , contentLengthKiloBytes = contentLengthBytes / 1024
+	  , responseTime = (new Date() - req._startTime) / 1000
+	  , bandwidth = Math.ceil(contentLengthKiloBytes/responseTime,2);
+	logger.info('%s %s - %s %s %s %s bytes - %s ms - %s kbps', success, req.ip, req.method, req.url, res.statusCode, contentLengthBytes, responseTime, bandwidth );
+}
 /* Configures and starts the web server for hosting content */
 // Example URL: http://localhost:8888/half/00000000-0000-0000-0000-000000000000/grade10-ela-mastercontent/grade10_ela_unit5_lesson7_task3_step1.html
 function startWebServer() {
-	// During a content sync, the service should not be accessible
-	app.use(function(req, res, next){
-		if(!contentSyncActive) return next();
-		res.send(503,"Service unavailable during content sync");
-	});
-	// TODO Implement the key functionality of this logger
-	app.use(function(req, res, next){
-		//logger.format('ccsoc', ':success :remote-addr - :method :url :status :res[content-length] bytes - :response-time ms - :bandwidth kbps');
-		logger.info('%s %s - %s %s %s %s bytes - %s ms - %s kbps', '[SUCCESS]', req.ip, req.method, req.url, '[STATUS]', '[RES-CNT-LEN]', '[RES-TIME]', '[BNDWIDTH]' );
+	// set start time for any request, so we can measure response time
+	app.use(function(req,res,next) {
+		req._startTime = new Date();
 		next();
 	});
 	// health check functionality
@@ -46,51 +53,80 @@ function startWebServer() {
         res.send({
 			'status': 'OK',
 			'downloadQueueSize': downloadQueue.length,
-			'downloadsRunning': downloadsRunning.length
+			'downloadsRunningCount': downloadsRunning.length,
+			'currentDownloads': u.map(downloadsRunning,function(x) { return {'container':x.blobContainerName, 'name': x.blobName }; })
 		});
+		logWebRequest(req,res);
     });
-	app.use('/', express.static(contentDirectory));
-	// handle 404's
-	app.use(function(req, res) {
-		var pathArray = req.path.split("/");
-		// ensure that on-demand downloads is enabled in the config before proceeding with the request
-		// a correct URL will always have at least 3 elements because the first is empty, the second is the container, and the third+onwards is going to be the blob name
-		if(!config.allowOnDemand || pathArray.length < 3) {
-			return res.send(404,"Not Found");
-		}
-		// since a path always starts with '/' the first element will always be empty
-		pathArray.shift();
-		// the directory at the root of the request is going to be the container name
-		var blobContainerName = pathArray.shift();
-		// validate the blob container name against the values listed in http://msdn.microsoft.com/en-us/library/dd135715.aspx
-		if(!blobContainerName.match(/^([a-z0-9](-[a-z0-9])?)+$/) || blobContainerName.length < 3 || blobContainerName.length > 63) {
-			logger.warn("On demand request with invalid container name '%s' dropped",blobContainerName);
-			return res.send(400,"Bad Request");
-		}
-		// the rest of the path is the blob name
-		var blobName = pathArray.join("/");
-		// create the object used to compare or put into download queue
-		var dqInfo = {
-			'destinationFilename': path.join(contentDirectory,blobContainerName,blobName),
-			'blobContainerName': blobContainerName,
-			'blobName': blobName,
-			'onDemand': true,
-			'req' : req,
-			'res' : res
-		};
-		// if this file is NOT (already in queue to be downloaded, or is currently downloading)
-		if(!(u.some(downloadQueue,compareBlobs,dqInfo) || u.some(downloadsRunning,compareBlobs,dqInfo))) {
-			// then add the file to the queue
-			downloadQueue.push(dqInfo);
-			logger.verbose("Added on-demand download request for "+blobContainerName+"/.../"+u.last(blobName.split('/')));
-			if(!config.onDemandRedirectToAzure) {
-				res.send(404,"Not Found; Queued for download");
+	// when doing browser testing, this is useful to stop the server from trying to fetch the favicon from azure by accident
+	app.get('/favicon.ico', function (req, res) {
+        res.send(404,"No Such Resource");
+		logWebRequest(req,res);
+    });
+	// During a content sync, the service should not be accessible
+	app.use(function(req, res, next){
+		if(!contentSyncActive) return next();
+		res.send(503,"Service unavailable during content sync"); // TODO Confirm if the iOS app will actually accept this response code properly; Ivan says it may be only looking for 404s even though it is not appropriate for this situation
+	});
+	// The core functionality to send content to the clients
+	app.get(/^.*/, function(req, res) {
+		res.sendfile(req.path, {root:contentDirectory}, function(error) {
+			var deferredToAzure = false;
+			// if the file does not exist...
+			if(error && error.errno === 34) {
+				var pathArray = req.path.split("/");
+				// ensure that on-demand downloads is enabled in the config before proceeding with the request
+				// a correct URL will always have at least 3 elements because the first is empty, the second is the container, and the third+onwards is going to be the blob name
+				if(!config.allowOnDemand || pathArray.length < 3) {
+					return res.send(404,"Not Found");
+				}
+				// since a path always starts with '/' the first element will always be empty
+				pathArray.shift();
+				// the directory at the root of the request is going to be the container name
+				var blobContainerName = pathArray.shift();
+				// validate the blob container name against the values listed in http://msdn.microsoft.com/en-us/library/dd135715.aspx
+				if(!blobContainerName.match(/^([a-z0-9](-[a-z0-9])?)+$/) || blobContainerName.length < 3 || blobContainerName.length > 63) {
+					logger.warn("On demand request with invalid container name '%s' dropped",blobContainerName);
+					return res.send(400,"Bad Request");
+				}
+				// the rest of the path is the blob name
+				var blobName = pathArray.join("/");
+				// create the object used to compare or put into download queue
+				var dqInfo = {
+					'destinationFilename': path.join(contentDirectory,blobContainerName,blobName),
+					'blobContainerName': blobContainerName,
+					'blobName': blobName,
+					'onDemand': true,
+					'req' : req,
+					'res' : res
+				};
+				// if this file is NOT (already in queue to be downloaded, or is currently downloading)
+				if(!(u.some(downloadQueue,compareBlobs,dqInfo) || u.some(downloadsRunning,compareBlobs,dqInfo))) {
+					// then add the file to the queue
+					downloadQueue.push(dqInfo);
+					logger.verbose("Added on-demand download request for "+blobContainerName+"/.../"+u.last(blobName.split('/')));
+					if(!config.onDemandRedirectToAzure) {
+						res.send(404,"Not Found; Queued for download");
+					} else {
+						deferredToAzure = true;
+					}
+				} else {
+					// if the download is already in queue, just send a 404 because we don't have the content yet
+					// the client will fall back to getting the piece from azure anyway
+					res.send(404,"Not Found; In queue for download but not ready yet");
+				}
 			}
-		} else {
-			// if the download is already in queue, just send a 404 because we don't have the content yet
-			// the client will fall back to getting the piece from azure anyway
-			res.send(404,"Not Found; In queue for download but not ready yet");
-		}
+			// some other error, aside from the file not existing (more serious)
+			else if(error) {
+				logger.error("Error sending file %s",req.path,error);
+				res.send(500, "Problem transferring requested file");
+			}
+			// otherwise the file was sent fine
+			else {
+				// do nothing, the file has already been sent.
+			}
+			if(!deferredToAzure) logWebRequest(req,res);
+		});
 	});
     app.listen(config.port);
 }
@@ -116,10 +152,12 @@ function downloadNextBlob() {
         downloadInfo = downloadQueue.shift();
         downloadsRunning.push(downloadInfo);
         downloadComplete = function () {
-            downloadsRunning = u.filter(downloadsRunning,compareBlob,downloadInfo);
+            downloadsRunning = u.filter(downloadsRunning,compareBlobsN,downloadInfo);
 			// when the download queue has been emptied, we are no longer syncing content
-			if(downloadQueue.length < 1) contentSyncActive = false;
-            return downloadNextBlob();
+			if(contentSyncActive && downloadQueue.length < 1) {
+				logger.info("Content sync is complete");
+				contentSyncActive = false;
+			}
         };
         restartDownload = function () {
 			downloadQueue.push(downloadInfo);
@@ -158,6 +196,7 @@ function downloadNextBlob() {
 				// if on-demand download, redirect the client to the azure URL
 				if(downloadInfo.onDemand && config.onDemandRedirectToAzure) {
 					downloadInfo.res.redirect(blobUrl);
+					logWebRequest(downloadInfo.req,downloadInfo.res);
 				}
 				logger.verbose("downloading " + blobUrl + " (" + blobProperties.contentLength + ") to " + tempFilename);
                 tempStream = fs.createWriteStream(tempFilename);
@@ -229,7 +268,6 @@ function downloadNextBlob() {
 								});
 							}
 							downloadComplete();
-							return logger.verbose("current downloads: " + downloadsRunning.length);
                         }
                     });
                 });
@@ -244,7 +282,7 @@ function getBlobs(blobService, blobContainer) {
 		return;
 	}
 	var localContainerDirectory = path.join(contentDirectory, blobContainer.name);
-	logger.info("Processing blobs for container: " + blobContainer.name);
+	logger.verbose("Processing blobs for container: " + blobContainer.name);
 	
 	// define a function that will process our blobs
 	/* It is necessary to declare a local function here because we ideally want to pass processBlobs as the callback to
@@ -294,7 +332,7 @@ function syncPackages() {
 	// only run sync when there are no active NON-ON-DEMAND downloads
 	var nonOnDemandDownloads = u.filter(downloadQueue,function(x) { return !x.onDemand }).length;
     if (!nonOnDemandDownloads.length && (config.syncHours.length === 0 || config.syncHours.indexOf((new Date()).getHours()) > -1)) {
-        logger.info('running syncPackages');
+        logger.info('Starting content synchronization');
         return blobService.listContainers(function (error, blobContainers, nextMarker) {
             var blobContainer, results;
             if (error) {
@@ -336,6 +374,7 @@ function startBroadcast() {
 }
 
 /* Start the application */
+logger.info("CCSoC Caching Server %s starting...",packageinfo.version);
 process.title = 'Pearson Caching Service';
 mkdirp(contentDirectory, function (error) {
     if (error) {
@@ -347,11 +386,12 @@ mkdirp(contentDirectory, function (error) {
 		syncPackages();
 		setInterval(syncPackages,config.syncInterval);
 	}
-	else logger.info("Not starting sync process because of config flag");
+	else logger.warn("Not starting sync process because of config flag");
 	// start processing the download queue
 	setImmediate(downloadNextBlob);
 	if(config.enableBroadcast) {
 		startBroadcast();
+	} else {
+		logger.warn("Not starting zeroconf broadcast because of config flag");
 	}
-	logger.info("CCSoC Cache Server started!");
 });
