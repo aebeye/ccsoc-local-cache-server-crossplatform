@@ -29,47 +29,49 @@ mkdirp(logDirectory,function(error) {
 	});
 });
 
-getmac(function(err,userId){
-	if (err) throw err;
-	logger.info("ID being used for Seer Logger: "+userId);
-	SeerLogger = winston.transports.SeerLogger = function (options) {
-		this.name = 'SeerLogger';
-		return this.level = options.level || 'info';
-	};
-	util.inherits(SeerLogger, winston.Transport);
-	SeerLogger.prototype.log = function (level, msg, meta, callback) {
-		if ((meta && meta.verb && !meta.noSeer) || ((level === 'warn' || level === 'error') && (meta && !meta.noSeer))) {
-			new Seer({
-				rootUrl: config.reportingUrl,
-				appId: config.reportingAppId,
-				password: config.reportingPassword,
-				dryRunMode: false
-			}).emitActivity({
-				actor: {
-					id: userId
-				},
-				verb: meta.verb || level,
-				object: {
-					id: msg || ' ',
-					objectType: 'cache-service'
-				},
-				generator: {
-					appId: config.reportingAppId
-				},
-				published: new Date()
-			}, function (error, response, body) {
-				if (error) {
-					return logger.error('error submitting event', {
-						noSeer: true
-					});
-				}
-			});
-		}
-		return callback(null, true);
-	};
-	logger.add(winston.transports.SeerLogger, {
-		level: config.logLevel
+if(config.useSeerLogger) {
+	getmac(function(err,userId){
+		if (err) throw err;
+		logger.info("ID being used for Seer Logger: "+userId);
+		SeerLogger = winston.transports.SeerLogger = function (options) {
+			this.name = 'SeerLogger';
+			return this.level = options.level || 'info';
+		};
+		util.inherits(SeerLogger, winston.Transport);
+		SeerLogger.prototype.log = function (level, msg, meta, callback) {
+			if ((meta && meta.verb && !meta.noSeer) || ((level === 'warn' || level === 'error') && (meta && !meta.noSeer))) {
+				new Seer({
+					rootUrl: config.reportingUrl,
+					appId: config.reportingAppId,
+					password: config.reportingPassword,
+					dryRunMode: false
+				}).emitActivity({
+					actor: {
+						id: userId
+					},
+					verb: meta.verb || level,
+					object: {
+						id: msg || ' ',
+						objectType: 'cache-service'
+					},
+					generator: {
+						appId: config.reportingAppId
+					},
+					published: new Date()
+				}, function (error, response, body) {
+					if (error) {
+						return logger.error('error submitting event', {
+							noSeer: true
+						});
+					}
+				});
+			}
+			return callback(null, true);
+		};
+		logger.add(winston.transports.SeerLogger, {
+			level: config.logLevel
+		});
 	});
-});
+}
 
 module.exports = logger;

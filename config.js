@@ -27,6 +27,7 @@ module.exports = {
 	 * number of users pulling content from the caching server. */
 	"concurrentDownloads" : 4,
 	/* Seer Service Details : REQUIRED */
+	"useSeerLogger" : false, // In production set this to true
 	"reportingUrl" : "https://seer-beacon.ecollege.com",
 	"reportingAppId" : "commoncore",
 	"reportingPassword" : "eiP93jd91lL",
@@ -43,5 +44,6 @@ module.exports = {
 	/* broadcastDetails (boolean) : REQUIRED
 	 * The network broadcast for Bonjour (dns-sd) allows the ability to add a TXT record with additional details. Setting
 	 * this to true will broadcast the server's caching software version, as well as what OS it is running on. */
+	"enableBroadcast" : false,
 	"broadcastDetails" : true
 };

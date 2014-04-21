@@ -1,4 +1,5 @@
 var config = require(__dirname + '/config.js')
+  , u = require('underscore')
   , express = require('express')
   , mkdirp = require('mkdirp')
   , path = require('path')
@@ -51,6 +52,11 @@ function startWebServer() {
 		pathArray.shift();
 		// the directory at the root of the request is going to be the container name
 		var blobContainerName = pathArray.shift();
+		// validate the blob container name against the values listed in http://msdn.microsoft.com/en-us/library/dd135715.aspx
+		if(!blobContainerName.match(/^([a-z0-9](-[a-z0-9])?)+$/) || blobContainerName.length < 3 || blobContainerName.length > 63) {
+			logger.warn("On demand request with invalid container name '%s' dropped",blobContainerName);
+			return res.send(400,"Bad Request");
+		}
 		// the rest of the path is the blob name
 		var blobName = pathArray.join("/");
 		downloadQueue.push({
@@ -90,9 +96,6 @@ function downloadNextBlob() {
         downloadsRunning += 1;
         downloadComplete = function () {
             downloadsRunning -= 1;
-			if(downloadInfo.onDemand) {
-				downloadInfo.res.redirect(downloadInfo.req.path);
-			}
             return downloadNextBlob();
         };
         restartDownload = function () {
@@ -101,9 +104,10 @@ function downloadNextBlob() {
 				delete downloadInfo.onDemand;
 				delete downloadInfo.req;
 				delete downloadInfo.res;
+			} else {
+				downloadQueue.push(downloadInfo);
 			}
-            downloadQueue.push(downloadInfo);
-            return downloadComplete();
+			return downloadComplete();
         };
         tempFilename = temp.path();
         blobService = getBlobService();
@@ -113,7 +117,8 @@ function downloadNextBlob() {
                 restartDownload();
                 if (error) {
                     return logger.error("getting blob properties for "+downloadInfo.blobContainerName+"/"+downloadInfo.blobName+": " + error, {
-                        noSeer: true
+                        noSeer: true,
+						onDemand: downloadInfo.onDemand
                     });
                 }
             }
@@ -126,6 +131,11 @@ function downloadNextBlob() {
                     }
                 };
                 blobUrl = blobService.getBlobUrl(downloadInfo.blobContainerName, downloadInfo.blobName, sharedAccessPolicy);
+				// if on-demand download, redirect the client to the azure URL
+				logger.info("redirecting on-demand client to azure: "+blobUrl);
+				if(downloadInfo.onDemand) {
+					downloadInfo.res.redirect(blobUrl);
+				}
                 logger.info("url: " + blobUrl);
                 tempStream = fs.createWriteStream(tempFilename);
                 startedAt = (new Date()).getTime();
@@ -320,6 +330,8 @@ mkdirp(contentDirectory, function (error) {
 	else logger.info("Not starting sync process because of config flag");
 	// start processing the download queue
 	setImmediate(downloadNextBlob);
-	startBroadcast();
+	if(config.enableBroadcast) {
+		startBroadcast();
+	}
 	logger.info("CCSoC Cache Server started!");
 });
