@@ -21,7 +21,22 @@ var config = require(__dirname + '/config.js')
 /* Global variables */
 var downloadsRunning = [] // array of currently downloading blobs
   , contentSyncActive = false // set to true when a full content sync is underway as a means to stop the web server from handling requests during this time
-  , downloadQueue = []; // downloads that are not yet running, but queued to be when their time comes
+  , downloadQueue = [] // downloads that are not yet running, but queued to be when their time comes
+  , downloadQueueSize = 0 // content length of items in queue
+  , lastAzureDownloadSpeed = 0;
+
+// convert number of bytes into a more human readable format
+function humanFileSize(bytes, si) {
+	var thresh = si ? 1000 : 1024;
+	if(bytes < thresh) return bytes + ' B';
+	var units = si ? ['kB','MB','GB','TB','PB','EB','ZB','YB'] : ['KiB','MiB','GiB','TiB','PiB','EiB','ZiB','YiB'];
+	var u = -1;
+	do {
+		bytes /= thresh;
+		++u;
+	} while(bytes >= thresh);
+	return bytes.toFixed(1)+' '+units[u];
+};  
 
 // compares two 'download info' queue objects against each other based on the blob name and container name
 function compareBlobs(inputBlob) {
@@ -53,9 +68,20 @@ function startWebServer() {
     app.get('/', function (req, res) {
         res.send({
 			'status': 'OK',
-			'downloadQueueSize': downloadQueue.length,
-			'downloadsRunningCount': downloadsRunning.length,
-			'currentDownloads': u.map(downloadsRunning,function(x) { return {'container':x.blobContainerName, 'name': x.blobName }; })
+			'download-status': {
+				'totals': {
+					'items-in-queue': downloadQueue.length,
+					'total-bytes': downloadQueueSize,
+					'total-filesize': humanFileSize(downloadQueueSize,true),
+					'current-download-count': downloadsRunning.length
+				},
+				'averages': {
+					'file-size': humanFileSize((downloadQueueSize/downloadQueue.length) || 0 ,true)
+				},
+				'speed-of-last-transfer': humanFileSize(lastAzureDownloadSpeed,true)+"/sec",
+				'estimated-seconds-remaining': parseInt(((downloadQueueSize/lastAzureDownloadSpeed) || 0).toFixed(0)),
+				'currentDownloads': u.map(downloadsRunning,function(x) { return {'container':x.blobContainerName, 'name': x.blobName, 'size': humanFileSize(x.size,true) }; })
+			}
 		});
 		logWebRequest(req,res);
     });
@@ -156,6 +182,7 @@ function downloadNextBlob() {
         downloadsRunning.push(downloadInfo);
 		// define callbacks for the various cases resulting from downloading this blob
         downloadComplete = function () {
+			downloadQueueSize -= downloadInfo.size;
             downloadsRunning = u.filter(downloadsRunning,compareBlobsN,downloadInfo);
 			// when the download queue has been emptied, we are no longer syncing content
 			if(contentSyncActive && downloadQueue.length < 1) {
@@ -222,8 +249,9 @@ function downloadNextBlob() {
                     return restartDownload();
                 });
                 return r.on('end', function () {
-                    var finishedAt;
-                    finishedAt = (new Date()).getTime();
+                    var finishedAt = (new Date()).getTime()
+					  , elapsedTimeInSeconds = ((finishedAt-startedAt)/1000).toFixed(3);
+					lastAzureDownloadSpeed = blobProperties.contentLength/elapsedTimeInSeconds;
                     return fs.exists(tempFilename, function (exists) {
                         if (!exists) {
                             logger.error("downloaded file not found");
@@ -244,7 +272,7 @@ function downloadNextBlob() {
 										return fs.unlink(tempFilename);
 									} else {
 										// validation succeeded via file size, move the file into its final destination on disk
-										logger.info("Download complete and verified by size. " + downloadInfo.destinationFilename + " in " + ((finishedAt - startedAt) / 1000) + "s");
+										logger.info("Download complete and verified by size. " + downloadInfo.destinationFilename + " in " + elapsedTimeInSeconds + "s");
 										mkdirp(path.dirname(downloadInfo.destinationFilename));
 										return fs.rename(tempFilename, downloadInfo.destinationFilename, function (error) {
 											if (error) {
@@ -269,7 +297,7 @@ function downloadNextBlob() {
 									fs.unlink(tempFilename);
 								} else {
 									// validation succeeded via MD5, move the file to its final destination on disk
-									logger.info("Download complete and verified with md5. " + downloadInfo.destinationFilename + " in " + ((finishedAt - startedAt) / 1000) + "s");
+									logger.info("Download complete and verified with md5. " + downloadInfo.destinationFilename + " in " + elapsedTimeInSeconds + "s");
 									mkdirp(path.dirname(downloadInfo.destinationFilename));
 									mv(tempFilename, downloadInfo.destinationFilename, {mkdirp: true}, function (error) {
 										if (error) {
@@ -321,8 +349,10 @@ function getBlobs(blobService, blobContainer) {
 				var newDownload = {
 					'destinationFilename': localBlobFilename,
 					'blobContainerName': blobContainer.name,
-					'blobName': blob.name
+					'blobName': blob.name,
+					'size' : parseInt(blob.properties['content-length']) || 0
 				};
+				downloadQueueSize += newDownload.size;
 				downloadQueue.push(newDownload);
 			}
 		}
