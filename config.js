@@ -37,11 +37,11 @@ module.exports = {
 	"logLevel": "info",
 	"maximumLogFileSize": 10000000,
 	"maximumLogFiles": 4,
-	/* allowOnDemand (boolean) : REQUIRED
+	/* allowOnDemand (boolean) : REQUIRED *BETA FUNCTIONALITY*
 	 * If set to true, when a user requests content that the caching server does not have, the caching server will attempt
-	 * to fetch that content from Azure in realtime and send it back to the user. This functionality is currently in BETA. */
+	 * to fetch that content from Azure in realtime and send it back to the user. */
 	"allowOnDemand" : true,
-	/* onDemandRedirectToAzure (boolean) : REQUIRED
+	/* onDemandRedirectToAzure (boolean) : REQUIRED *BETA FUNCTIONALITY*
 	 * When true this will send a redirect response to to the azure blob URL instead of a 404 when the caching server doesn't have a file. */
 	"onDemandRedirectToAzure" : false,
 	/* enableBroadcast (boolean) : REQUIRED

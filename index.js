@@ -40,6 +40,7 @@ function logWebRequest(req, res){
 	  , bandwidth = Math.ceil(contentLengthKiloBytes/responseTime,2);
 	logger.info('%s %s - %s %s %s %s bytes - %s ms - %s kbps', success, req.ip, req.method, req.url, res.statusCode, contentLengthBytes, responseTime, bandwidth );
 }
+
 /* Configures and starts the web server for hosting content */
 // Example URL: http://localhost:8888/half/00000000-0000-0000-0000-000000000000/grade10-ela-mastercontent/grade10_ela_unit5_lesson7_task3_step1.html
 function startWebServer() {
@@ -290,6 +291,7 @@ function downloadNextBlob() {
     }
 };
 
+// For a given container, downloads all blobs contained therein
 function getBlobs(blobService, blobContainer) {
 	// skip the excluded containers, do not download them
 	if (blobContainer.name.match(config.excludeContainerPattern)) {
@@ -341,6 +343,7 @@ function getBlobs(blobService, blobContainer) {
 	});
 };
 
+// The main entry point for performing a full content sync from azure to the local machine
 function syncPackages() {
 	var blobService = getBlobService();
 	// only run sync when there are no active NON-ON-DEMAND downloads
@@ -363,6 +366,7 @@ function syncPackages() {
     }
 };
 
+// The main entry point for starting the zeroconf (bonjour) broadcast
 function startBroadcast() {
 	var bonjourServiceType = '_ccsoc-'+config.environmentIdentifier.toLowerCase()+'._tcp';
 	logger.info("Starting zeroconf (bonjour) broadcast for service "+bonjourServiceType);
