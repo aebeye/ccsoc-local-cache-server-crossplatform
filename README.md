@@ -58,6 +58,7 @@ Maintaining this project is a continued effort, and there are some features from
 * 'Forever' running of the application, restarting itself if it crashes
 * Send a heartbeat signal to the Seer logger
 * Testing of the Seer logger to ensure it works on the receiving side
+* Deleting (or archiving?) old logs automatically
 
 ## Caveats and Potential Issues
 
