@@ -274,10 +274,12 @@ function downloadNextBlob() {
 										// validation succeeded via file size, move the file into its final destination on disk
 										logger.info("Download complete and verified by size. " + downloadInfo.destinationFilename + " in " + elapsedTimeInSeconds + "s");
 										mkdirp(path.dirname(downloadInfo.destinationFilename));
-										return fs.rename(tempFilename, downloadInfo.destinationFilename, function (error) {
+										mv(tempFilename, downloadInfo.destinationFilename, {mkdirp: true}, function (error) {
 											if (error) {
-												logger.error("renaming file: " + error);
-												return restartDownload();
+												logger.error("renaming file: " + error, {
+													verb: 'content-sync'
+												});
+												restartDownload();
 											}
 										});
 									}
