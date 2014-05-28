@@ -7,7 +7,7 @@ module.exports = {
 	 * This is the environment identifier, also known as the 'config code'. This affects the type of bonjour service that
 	 * is broadcast to the local network. The Pearson app will always look for the matching broadcast from the specified
 	 * config code in the app, so ensure you are broadcasting the correct config code or else your app will not pick it up. */
-	"environmentIdentifier" : "ccsocdct", // default/prod was d6z9r8
+	"environmentIdentifier" : "d6z9r8", // default/prod was d6z9r8
 	/* Azure Connection Details : REQUIRED */
 	"storageAccountName" : "ccsocwestrepo2",
 	"storageAccountSecret" : "TXsXgfl8iBHMlTdC1oQlJz1zMY2ppVVULL88/f0ukzf6KZOJ60jQArP20xD4cZzYF9K5bTDAuCfupOgyJioHgQ==",
@@ -46,7 +46,7 @@ module.exports = {
 	"onDemandRedirectToAzure" : false,
 	/* enableBroadcast (boolean) : REQUIRED
 	 * When set to 'true' the bonjour piece will broadcast the availability of the caching server to the network. */
-	"enableBroadcast" : false,
+	"enableBroadcast" : true,
 	/* broadcastDetails (boolean) : REQUIRED
 	 * The network broadcast for Bonjour (dns-sd) allows the ability to add a TXT record with additional details. Setting
 	 * this to true will broadcast the server's caching software version, as well as what OS it is running on. */

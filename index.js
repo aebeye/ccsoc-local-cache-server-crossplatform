@@ -9,6 +9,7 @@ var config = require(__dirname + '/config.js')
   , fs = require('fs')
   , util = require('util')
   , temp = require('temp')
+  , request = require('request')
   , mv = require('mv')
   , os = require('os')
   , exec = require('child_process').exec
