@@ -105,7 +105,7 @@ function startWebServer() {
 					var md5hash = md5(localPath);
 					res.setHeader("Content-MD5",md5hash);
 				}
-				res.sendfile(req.path, {root:contentDirectory}, function(error) {
+				res.sendfile(req.path, {root:contentDirectory, hidden:true}, function(error) {
 					// if there's a problem sending, aside from the file not existing
 					if(error) {
 						logger.error("Error sending file %s",req.path,error);
