@@ -97,10 +97,27 @@ function startWebServer() {
 	});
 	// The core functionality to send content to the clients
 	app.get(/^.*/, function(req, res) {
-		res.sendfile(req.path, {root:contentDirectory}, function(error) {
+		var localPath = path.join(contentDirectory,req.path);
+		fs.exists(localPath,function(exists) {
 			var deferredToAzure = false;
-			// if the file does not exist...
-			if(error && error.errno === 34) {
+			if(exists) {
+				if(config.sendHash) {
+					var md5hash = md5(localPath);
+					res.setHeader("Content-MD5",md5hash);
+				}
+				res.sendfile(req.path, {root:contentDirectory}, function(error) {
+					// if there's a problem sending, aside from the file not existing
+					if(error) {
+						logger.error("Error sending file %s",req.path,error);
+						res.send(500, "Problem transferring requested file");
+					}
+					// otherwise the file was sent fine
+					else {
+						// do nothing, the file has already been sent.
+					}
+				});
+			} else {
+				// if the file does not exist...
 				var pathArray = req.path.split("/");
 				// ensure that on-demand downloads is enabled in the config before proceeding with the request
 				// a correct URL will always have at least 3 elements because the first is empty, the second is the container, and the third+onwards is going to be the blob name
@@ -142,15 +159,6 @@ function startWebServer() {
 					// the client will fall back to getting the piece from azure anyway
 					res.send(404,"Not Found; In queue for download but not ready yet");
 				}
-			}
-			// some other error, aside from the file not existing (more serious)
-			else if(error) {
-				logger.error("Error sending file %s",req.path,error);
-				res.send(500, "Problem transferring requested file");
-			}
-			// otherwise the file was sent fine
-			else {
-				// do nothing, the file has already been sent.
 			}
 			if(!deferredToAzure) logWebRequest(req,res);
 		});
