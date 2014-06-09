@@ -97,7 +97,7 @@ function startWebServer() {
 	});
 	// The core functionality to send content to the clients
 	app.get(/^.*/, function(req, res) {
-		res.sendfile(req.path, {root:contentDirectory}, function(error) {
+		res.sendfile(req.path, {root:contentDirectory, hidden: true}, function(error) {
 			var deferredToAzure = false;
 			// if the file does not exist...
 			if(error && error.errno === 34) {
