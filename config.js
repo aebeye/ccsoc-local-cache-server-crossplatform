@@ -51,8 +51,7 @@ module.exports = {
 	 * The network broadcast for Bonjour (dns-sd) allows the ability to add a TXT record with additional details. Setting
 	 * this to true will broadcast the server's caching software version, as well as what OS it is running on. */
 	"broadcastDetails" : true,
-	/* sendHash (boolean) : REQUIRED
-	 * If set to true, the caching server will send a response header 'Content-MD5' for every file requested, identical to how azure blob storage works.
-	 * This may put a high amount of extra load on the server but may improve client-side data verification; use with caution. */
-	 "sendHash" : true
+	/* numberOfAttempts (int) : REQUIRED
+	 * The number of times to attempt downloading a file if we fail to get it from azure. 0=infinite (HIGHLY NOT RECOMMENDED!) */
+	 "numberOfAttempts" : 1
 };

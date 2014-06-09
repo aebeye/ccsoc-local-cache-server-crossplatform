@@ -11,7 +11,7 @@ var SeerLogger;
 var logger = new winston.Logger({
 	transports: [
 		new winston.transports.Console({
-			handleExceptions: false,
+			handleExceptions: true,
 			colorize: true,
 			level: 'debug'
 		})

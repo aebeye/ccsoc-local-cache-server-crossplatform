@@ -97,27 +97,10 @@ function startWebServer() {
 	});
 	// The core functionality to send content to the clients
 	app.get(/^.*/, function(req, res) {
-		var localPath = path.join(contentDirectory,req.path);
-		fs.exists(localPath,function(exists) {
+		res.sendfile(req.path, {root:contentDirectory}, function(error) {
 			var deferredToAzure = false;
-			if(exists) {
-				if(config.sendHash) {
-					var md5hash = md5(localPath);
-					res.setHeader("Content-MD5",md5hash);
-				}
-				res.sendfile(req.path, {root:contentDirectory, hidden:true}, function(error) {
-					// if there's a problem sending, aside from the file not existing
-					if(error) {
-						logger.error("Error sending file %s",req.path,error);
-						res.send(500, "Problem transferring requested file");
-					}
-					// otherwise the file was sent fine
-					else {
-						// do nothing, the file has already been sent.
-					}
-				});
-			} else {
-				// if the file does not exist...
+			// if the file does not exist...
+			if(error && error.errno === 34) {
 				var pathArray = req.path.split("/");
 				// ensure that on-demand downloads is enabled in the config before proceeding with the request
 				// a correct URL will always have at least 3 elements because the first is empty, the second is the container, and the third+onwards is going to be the blob name
@@ -142,7 +125,8 @@ function startWebServer() {
 					'blobName': blobName,
 					'onDemand': true,
 					'req' : req,
-					'res' : res
+					'res' : res,
+					'attemptsLeft' : config.numberOfAttempts
 				};
 				// if this file is NOT (already in queue to be downloaded, or is currently downloading)
 				if(!(u.some(downloadQueue,compareBlobs,dqInfo) || u.some(downloadsRunning,compareBlobs,dqInfo))) {
@@ -159,6 +143,15 @@ function startWebServer() {
 					// the client will fall back to getting the piece from azure anyway
 					res.send(404,"Not Found; In queue for download but not ready yet");
 				}
+			}
+			// some other error, aside from the file not existing (more serious)
+			else if(error) {
+				logger.error("Error sending file %s",req.path,error);
+				res.send(500, "Problem transferring requested file");
+			}
+			// otherwise the file was sent fine
+			else {
+				// do nothing, the file has already been sent.
 			}
 			if(!deferredToAzure) logWebRequest(req,res);
 		});
@@ -199,7 +192,12 @@ function downloadNextBlob() {
 			}
         };
         restartDownload = function () {
-			downloadQueue.push(downloadInfo);
+			downloadInfo.attemptsLeft--;
+			if(downloadInfo.attemptsLeft > 0 || config.numberOfAttempts == 0) {
+				downloadQueue.push(downloadInfo);
+			} else {
+				logger.warn("Number of retries for blob "+downloadInfo.blobContainerName+"/"+downloadInfo.blobName+" has been exceeded; dropping it from the queue.");
+			}
 			return downloadComplete();
         };
 		// Get a temporary path into which we can download our blob
@@ -208,22 +206,18 @@ function downloadNextBlob() {
         return blobService.getBlobProperties(downloadInfo.blobContainerName, downloadInfo.blobName, function (error, blobProperties, response) {
             var blobUrl, r, sharedAccessPolicy, startedAt, tempStream;
             if (error) {
+                logger.error("getting blob properties for "+downloadInfo.blobContainerName+"/"+downloadInfo.blobName+": " + error, {
+					noSeer: true,
+					onDemand: !u.isUndefined(downloadInfo.onDemand) && downloadInfo.onDemand
+				});
 				// if we encountered an error at this stage for an on-demand download, it's probably a malicious or malformed request. We do not want to
 				// reschedule it so we just send a 404 and call it complete
-                if(downloadInfo.onDemand) {
+				// this only needs to be done when 'redirect to azure' is turned on because otherwise we would've sent a 404 already
+                if(downloadInfo.onDemand && config.onDemandRedirectToAzure) {
+					delete downloadInfo.onDemand;
 					downloadInfo.res.send(404,"Not Found; On-Demand Failed");
-					downloadComplete();
 				}
-				// for non-on-demand downloads we want to push this request back into the queue
-				else {
-					restartDownload();
-				}
-                if (error) {
-                    return logger.error("getting blob properties for "+downloadInfo.blobContainerName+"/"+downloadInfo.blobName+": " + error, {
-                        noSeer: true,
-						onDemand: !u.isUndefined(downloadInfo.onDemand) && downloadInfo.onDemand
-                    });
-                }
+				return restartDownload();
             }
 			else {
 				// fetch the URL to the blob as per the access policy
@@ -360,7 +354,8 @@ function getBlobs(blobService, blobContainer) {
 					'destinationFilename': localBlobFilename,
 					'blobContainerName': blobContainer.name,
 					'blobName': blob.name,
-					'size' : parseInt(blob.properties['content-length']) || 0
+					'size' : parseInt(blob.properties['content-length']) || 0,
+					'attemptsLeft' : config.numberOfAttempts
 				};
 				downloadQueueSize += newDownload.size;
 				downloadQueue.push(newDownload);
