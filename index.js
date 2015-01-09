@@ -65,8 +65,8 @@ function startWebServer() {
 		next();
 	});
 	// health check functionality
-    app.get('/', function (req, res) {
-        res.send({
+	app.get('/', function (req, res) {
+		res.send({
 			'status': 'OK',
 			'download-status': {
 				'totals': {
@@ -84,12 +84,12 @@ function startWebServer() {
 			}
 		});
 		logWebRequest(req,res);
-    });
+	});
 	// when doing browser testing, this is useful to stop the server from trying to fetch the favicon from azure by accident
 	app.get('/favicon.ico', function (req, res) {
-        res.send(404,"No Such Resource");
+		res.send(404,"No Such Resource");
 		logWebRequest(req,res);
-    });
+	});
 	// During a content sync, the service should not be accessible
 	app.use(function(req, res, next){
 		if(!contentSyncActive) return next();
@@ -156,14 +156,14 @@ function startWebServer() {
 			if(!deferredToAzure) logWebRequest(req,res);
 		});
 	});
-    app.listen(config.port);
+	app.listen(config.port);
 }
 
 /* Get a handle to the Azure blob service */
 function getBlobService() {
-    var connectionString;
-    connectionString = "DefaultEndpointsProtocol=https;AccountName=" + config.storageAccountName + ";AccountKey=" + config.storageAccountSecret;
-    return azure.createBlobService(connectionString).withFilter(new azure.ExponentialRetryPolicyFilter());
+	var connectionString;
+	connectionString = "DefaultEndpointsProtocol=https;AccountName=" + config.storageAccountName + ";AccountKey=" + config.storageAccountSecret;
+	return azure.createBlobService(connectionString).withFilter(new azure.ExponentialRetryPolicyFilter());
 }
 
 // Calculate the base64 encoded MD5 hash of the file given (for validation against azure)
@@ -177,21 +177,21 @@ function md5(filename) {
 function downloadNextBlob() {
 	// queue the next download check call
 	setImmediate(downloadNextBlob);
-    var downloadComplete, downloadInfo, restartDownload, tempFilename;
-    if (downloadQueue.length > 0 && downloadsRunning.length < config.concurrentDownloads) {
-        downloadInfo = downloadQueue.shift();
-        downloadsRunning.push(downloadInfo);
+	var downloadComplete, downloadInfo, restartDownload, tempFilename;
+	if (downloadQueue.length > 0 && downloadsRunning.length < config.concurrentDownloads) {
+		downloadInfo = downloadQueue.shift();
+		downloadsRunning.push(downloadInfo);
 		// define callbacks for the various cases resulting from downloading this blob
-        downloadComplete = function () {
+		downloadComplete = function () {
 			downloadQueueSize -= downloadInfo.size;
-            downloadsRunning = u.filter(downloadsRunning,compareBlobsN,downloadInfo);
+			downloadsRunning = u.filter(downloadsRunning,compareBlobsN,downloadInfo);
 			// when the download queue has been emptied, we are no longer syncing content
 			if(contentSyncActive && downloadQueue.length < 1) {
 				logger.info("Content sync is complete");
 				contentSyncActive = false;
 			}
-        };
-        restartDownload = function () {
+		};
+		restartDownload = function () {
 			downloadInfo.attemptsLeft--;
 			if(downloadInfo.attemptsLeft > 0 || config.numberOfAttempts == 0) {
 				downloadQueue.push(downloadInfo);
@@ -199,35 +199,35 @@ function downloadNextBlob() {
 				logger.warn("Number of retries for blob "+downloadInfo.blobContainerName+"/"+downloadInfo.blobName+" has been exceeded; dropping it from the queue.");
 			}
 			return downloadComplete();
-        };
+		};
 		// Get a temporary path into which we can download our blob
-        tempFilename = temp.path();
-        blobService = getBlobService();
-        return blobService.getBlobProperties(downloadInfo.blobContainerName, downloadInfo.blobName, function (error, blobProperties, response) {
-            var blobUrl, r, sharedAccessPolicy, startedAt, tempStream;
-            if (error) {
-                logger.error("getting blob properties for "+downloadInfo.blobContainerName+"/"+downloadInfo.blobName+": " + error, {
+		tempFilename = temp.path();
+		blobService = getBlobService();
+		return blobService.getBlobProperties(downloadInfo.blobContainerName, downloadInfo.blobName, function (error, blobProperties, response) {
+			var blobUrl, r, sharedAccessPolicy, startedAt, tempStream;
+			if (error) {
+				logger.error("getting blob properties for "+downloadInfo.blobContainerName+"/"+downloadInfo.blobName+": " + error, {
 					noSeer: true,
 					onDemand: !u.isUndefined(downloadInfo.onDemand) && downloadInfo.onDemand
 				});
 				// if we encountered an error at this stage for an on-demand download, it's probably a malicious or malformed request. We do not want to
 				// reschedule it so we just send a 404 and call it complete
 				// this only needs to be done when 'redirect to azure' is turned on because otherwise we would've sent a 404 already
-                if(downloadInfo.onDemand && config.onDemandRedirectToAzure) {
+				if(downloadInfo.onDemand && config.onDemandRedirectToAzure) {
 					delete downloadInfo.onDemand;
 					downloadInfo.res.send(404,"Not Found; On-Demand Failed");
 				}
 				return restartDownload();
-            }
+			}
 			else {
 				// fetch the URL to the blob as per the access policy
-                sharedAccessPolicy = {
-                    AccessPolicy: {
-                        Permissions: azure.Constants.BlobConstants.SharedAccessPermissions.READ,
-                        Expiry: azure.date.minutesFromNow(6000)
-                    }
-                };
-                blobUrl = blobService.getBlobUrl(downloadInfo.blobContainerName, downloadInfo.blobName, sharedAccessPolicy);
+				sharedAccessPolicy = {
+					AccessPolicy: {
+						Permissions: azure.Constants.BlobConstants.SharedAccessPermissions.READ,
+						Expiry: azure.date.minutesFromNow(6000)
+					}
+				};
+				blobUrl = blobService.getBlobUrl(downloadInfo.blobContainerName, downloadInfo.blobName, sharedAccessPolicy);
 				// if on-demand download, redirect the client to the azure URL
 				if(downloadInfo.onDemand && config.onDemandRedirectToAzure) {
 					downloadInfo.res.redirect(blobUrl);
@@ -235,30 +235,30 @@ function downloadNextBlob() {
 				}
 				// begin the download for this blob into the temporary directory
 				logger.verbose("downloading " + blobUrl + " (" + blobProperties.contentLength + ") to " + tempFilename);
-                tempStream = fs.createWriteStream(tempFilename);
-                startedAt = (new Date()).getTime();
-                r = request({
-                    url: blobUrl,
-                    timeout: 10 * 1000
-                });
-                r.pipe(tempStream);
-                r.on('error', function (error) {
-                    logger.error("request error: " + error, {
-                        noSeer: true
-                    });
-                    tempStream.close();
-                    fs.unlink(tempFilename);
-                    return restartDownload();
-                });
-                return r.on('end', function () {
-                    var finishedAt = (new Date()).getTime()
+				tempStream = fs.createWriteStream(tempFilename);
+				startedAt = (new Date()).getTime();
+				r = request({
+					url: blobUrl,
+					timeout: 10 * 1000
+				});
+				r.pipe(tempStream);
+				r.on('error', function (error) {
+					logger.error("request error: " + error, {
+						noSeer: true
+					});
+					tempStream.close();
+					fs.unlink(tempFilename);
+					return restartDownload();
+				});
+				return r.on('end', function () {
+					var finishedAt = (new Date()).getTime()
 					  , elapsedTimeInSeconds = ((finishedAt-startedAt)/1000).toFixed(3);
 					lastAzureDownloadSpeed = blobProperties.contentLength/elapsedTimeInSeconds;
-                    return fs.exists(tempFilename, function (exists) {
-                        if (!exists) {
-                            logger.error("downloaded file not found");
-                            return restartDownload();
-                        } else {
+					return fs.exists(tempFilename, function (exists) {
+						if (!exists) {
+							logger.error("downloaded file not found");
+							return restartDownload();
+						} else {
 							// if the file doesn't have an associated MD5 hash from Azure against which to validate, we must fall back to validating via the filesize
 							if (!blobProperties.contentMD5) {
 								logger.warn("File doesn't have an md5 hash to verify.  Falling back to size check.", {
@@ -315,12 +315,12 @@ function downloadNextBlob() {
 							}
 							// callback to let the application know this file is done downloading
 							downloadComplete();
-                        }
-                    });
-                });
-            }
-        });
-    }
+						}
+					});
+				});
+			}
+		});
+	}
 };
 
 // For a given container, downloads all blobs contained therein
@@ -383,22 +383,22 @@ function syncPackages() {
 	var blobService = getBlobService();
 	// only run sync when there are no active NON-ON-DEMAND downloads
 	var nonOnDemandDownloads = u.filter(downloadQueue,function(x) { return !x.onDemand }).length;
-    if (!nonOnDemandDownloads.length && (config.syncHours.length === 0 || config.syncHours.indexOf((new Date()).getHours()) > -1)) {
-        logger.info('Starting content synchronization');
-        return blobService.listContainers(function (error, blobContainers, nextMarker) {
-            var blobContainer, results;
-            if (error) {
-                return logger.error("listing containers: " + error, {
-                    verb: 'content-sync'
-                });
-            }
+	if (!nonOnDemandDownloads.length && (config.syncHours.length === 0 || config.syncHours.indexOf((new Date()).getHours()) > -1)) {
+		logger.info('Starting content synchronization');
+		return blobService.listContainers(function (error, blobContainers, nextMarker) {
+			var blobContainer, results;
+			if (error) {
+				return logger.error("listing containers: " + error, {
+					verb: 'content-sync'
+				});
+			}
 			// mark content sync as being active; thereby making content downloads unavailable
 			contentSyncActive = true;
 			for(var i=0;i < blobContainers.length; i++) {
 				getBlobs(blobService, blobContainers[i]);
 			}
-        });
-    }
+		});
+	}
 };
 
 // The main entry point for starting the zeroconf (bonjour) broadcast
@@ -431,12 +431,12 @@ logger.info("CCSoC Caching Server %s starting...",packageinfo.version);
 process.title = 'Pearson Caching Service';
 // Create the content directory
 mkdirp(contentDirectory, function (error) {
-    if (error) {
+	if (error) {
 		logger.error("CRITICAL: Failed to create content directory: "+error);
 		process.exit(-1);
 	}
 	// Start listening for client requests
-    startWebServer();
+	startWebServer();
 	// Enable syncing if config allows it
 	if(config.syncInterval > 0) {
 		syncPackages();
