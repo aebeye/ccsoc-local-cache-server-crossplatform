@@ -203,7 +203,7 @@ function downloadNextBlob() {
 		};
 		// Get a temporary path into which we can download our blob
 		tempFilename = temp.path();
-		blobService = getBlobService();
+		var blobService = getBlobService();
 		return blobService.getBlobProperties(downloadInfo.blobContainerName, downloadInfo.blobName, function (error, blobProperties, response) {
 			var blobUrl, r, sharedAccessPolicy, startedAt, tempStream;
 			if (error) {
@@ -346,7 +346,8 @@ function getBlobs(blobService, blobContainer) {
 		if(blobs === null) {
 			return;
 		}
-		var blob;
+		var blob
+		  , localBlobFilename;
 		for (var i = 0; i < blobs.length; i++) {
 			blob = blobs[i];
 			localBlobFilename = path.join(localContainerDirectory, blob.name);
