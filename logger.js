@@ -1,10 +1,11 @@
+'use strict';
 var path = require('path')
-  , config = require(path.join(__dirname, "config.js"))
+  , config = require(path.join(__dirname, 'config.js'))
   , getmac = require('getmac').getMac
   , winston = require('winston')
   , util = require('util')
   , mkdirp = require('mkdirp')
-  , logDirectory = path.join(__dirname, "log");
+  , logDirectory = path.join(__dirname, 'log');
 
 var SeerLogger;
 
@@ -19,9 +20,9 @@ var logger = new winston.Logger({
 });
 
 mkdirp(logDirectory,function(error) {
-	if(error) return logger.error("Failed to create log directory "+logDirectory);
+	if(error) return logger.error('Failed to create log directory '+logDirectory);
 	logger.add(winston.transports.File, {
-		filename: path.join(__dirname, "log", "service.log"),
+		filename: path.join(__dirname, 'log', 'service.log'),
 		handleExceptions: true,
 		json: false,
 		maxFiles: config.maximumLogFiles,
@@ -33,7 +34,7 @@ mkdirp(logDirectory,function(error) {
 if(config.useSeerLogger) {
 	getmac(function(err,userId){
 		if (err) throw err;
-		logger.info("ID being used for Seer Logger: "+userId);
+		logger.info('ID being used for Seer Logger: '+userId);
 		SeerLogger = winston.transports.SeerLogger = function (options) {
 			this.name = 'SeerLogger';
 			return this.level = options.level || 'info';
