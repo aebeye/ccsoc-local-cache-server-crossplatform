@@ -17,7 +17,7 @@ This project has been only tested with **Windows 8**. Other versions of Windows 
 1. Install Apple's Bonjour SDK for Windows 2.0.4 (included in this package in the support folder) which will provide the required 'dns-sd' command to broadcast the Bonjour signal.
 2. Install Node.JS (tested on v0.10.24)
 3. Navigate to the project directory and run 'npm install' to download all required modules
-4. Run the project using 'node index.js'
+4. Run the project using 'npm start'
 
 ## Running on a Mac
 This documentation has yet to be created. *The steps should be more or less the same as for windows however.*
