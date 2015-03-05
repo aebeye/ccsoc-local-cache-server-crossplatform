@@ -288,6 +288,7 @@ function downloadNextBlob() {
 								});
 							}
 							else {
+								/*
 								// now that the file has been downloaded, we need to validate its hash
 								var hash = md5(tempFilename);
 								if (hash !== blobProperties.contentMD5) {
@@ -311,7 +312,18 @@ function downloadNextBlob() {
 											restartDownload();
 										}
 									});
-								}
+								}*/
+								// move the file to its final destination on disk
+								logger.info("Download complete. " + downloadInfo.destinationFilename + " in " + elapsedTimeInSeconds + "s");
+								mkdirp(path.dirname(downloadInfo.destinationFilename));
+								mv(tempFilename, downloadInfo.destinationFilename, {mkdirp: true}, function (error) {
+									if (error) {
+										logger.error("renaming file: " + error, {
+												verb: 'content-sync'
+										});
+										restartDownload();
+									}
+								});
 							}
 							// callback to let the application know this file is done downloading
 							downloadComplete();
