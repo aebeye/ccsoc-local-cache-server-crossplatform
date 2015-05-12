@@ -3,6 +3,8 @@ module.exports = {
 	 * This sets the regular expression against which azure container names are tested. If the container name matches
 	 * this pattern, the container is ignored for the purposes of syncing content. */
 	"excludeContainerPattern" : /mastercontent$/,
+    /* Array of azure container names to be included for content sync */
+    "includeDirectories": ["content", "half", "k1content"],
 	/* environmentIdentifier (string) : REQUIRED
 	 * This is the environment identifier, also known as the 'config code'. This affects the type of bonjour service that
 	 * is broadcast to the local network. The Pearson app will always look for the matching broadcast from the specified
@@ -53,5 +55,21 @@ module.exports = {
 	"broadcastDetails" : true,
 	/* numberOfAttempts (int) : REQUIRED
 	 * The number of times to attempt downloading a file if we fail to get it from azure. 0=infinite (HIGHLY NOT RECOMMENDED!) */
-	 "numberOfAttempts" : 1
+	 "numberOfAttempts" : 1,
+    /* Settings related to Config Code and ContentSet*/
+    "configCodeSettings":
+    {
+        /* Blob uri to retrieve config code data as json file */
+        "blobBaseUri": "https://ccsoc.blob.core.windows.net/configuration/",
+        /* Relative folder to store config code files streamed from blobBaseUri */
+        "relativeLocalPath": "config-code"
+    },
+    /* Settings related to exponential retry policy. Currently using default values */
+    "exponentialRetry":
+    {
+        "retryCount": 3, //Represents the client retry count
+        "retryInterval": 30000, //Represents the maximum retry interval, in milliseconds
+        "minRetryInterval": 3000, //Represents the minimum retry interval, in milliseconds
+        "maxRetryInterval": 90000 //Represents the maximum retry interval, in milliseconds
+    }
 };
