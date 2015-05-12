@@ -19,7 +19,7 @@ module.exports = {
 	/* syncInterval (int) : REQUIRED
 	 * This is the number of milliseconds between sync attempts for Azure content.
 	 * A value of 0 disables sync */
-	"syncInterval" : 1800000, // prod value is 1800000 milliseconds (30 mins)
+	"syncInterval" : 0, // prod value is 1800000 milliseconds (30 mins)
 	/* syncHours ([int]) : REQUIRED
 	 * This is the hours of the day (in 24 hour time; 0 being midnight) when to perform content syncs. If omitted or
 	 * empty, the sync will not care what hour it is and continue anyway. */

@@ -10,7 +10,7 @@ var path = require('path'),
 exports.getConfigCodeDetails = function(environmentIdentifier, configCodeFolder, callback) {
     if (!environmentIdentifier || environmentIdentifier.length === 0) {
         var paramError = new Error('Fatal Error has occurred. Invalid environmentIdentifier: ' + environmentIdentifier);
-        callback(paramError);
+        return callback(paramError);
     }
 
     var baseUri = config.configCodeSettings.blobBaseUri,
@@ -26,7 +26,7 @@ exports.getConfigCodeDetails = function(environmentIdentifier, configCodeFolder,
         })
         .on('error', function(err) {
             writeStream.close();
-            callback(err);
+            return callback(err);
         });
 };
 
@@ -39,7 +39,7 @@ exports.getContentSetFromConfigCodeFile = function(configCodeFile, callback) {
             var paramError = new Error('Fatal Error has occurred. Invalid configCodeFile: ' + configCodeFile);
             return callback(paramError);
         }
-        //return callback(null, 'test');
+
         var data = JSON.parse(fs.readFileSync(configCodeFile, 'utf8'));
         if (data) {
             contentSet = data.contentSetIdentifier;
@@ -49,10 +49,10 @@ exports.getContentSetFromConfigCodeFile = function(configCodeFile, callback) {
             callback(null, contentSet);
         } else {
             var contentSetError = new Error('Fatal Error has occurred. Missing Content Set in Config Code File: ' + configCodeFile);
-            callback(contentSetError);
+            return callback(contentSetError);
         }
 
     } catch (err) {
-        callback(err);
+        return callback(err);
     }
 };
