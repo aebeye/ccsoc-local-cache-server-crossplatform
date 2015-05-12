@@ -16,14 +16,18 @@ var config = require(__dirname + '/config.js')
   , app = express()
   , config = require(path.join(__dirname, "config.js"))
   , packageinfo = require(path.join(__dirname, "package.json"))
-  , contentDirectory = path.join(__dirname, "content");
+  , contentDirectory = path.join(__dirname, "content")
+  , async = require('async')
+  , configCodeService = require(__dirname + '/services/configcode');
 
 /* Global variables */
 var downloadsRunning = [] // array of currently downloading blobs
   , contentSyncActive = false // set to true when a full content sync is underway as a means to stop the web server from handling requests during this time
   , downloadQueue = [] // downloads that are not yet running, but queued to be when their time comes
   , downloadQueueSize = 0 // content length of items in queue
-  , lastAzureDownloadSpeed = 0;
+  , lastAzureDownloadSpeed = 0
+    //Content Set to be fetched in content set
+  , identifiedContentSet = '00000000-0000-0000-0000-000000000000';
 
 // convert number of bytes into a more human readable format
 function humanFileSize(bytes, si) {
@@ -162,8 +166,12 @@ function startWebServer() {
 /* Get a handle to the Azure blob service */
 function getBlobService() {
     var connectionString;
+    var retryOperations = new azure.ExponentialRetryPolicyFilter(config.exponentialRetry.retryCount,
+        config.exponentialRetry.retryInterval,
+        config.exponentialRetry.minRetryInterval,
+        config.exponentialRetry.maxRetryInterval);
     connectionString = "DefaultEndpointsProtocol=https;AccountName=" + config.storageAccountName + ";AccountKey=" + config.storageAccountSecret;
-    return azure.createBlobService(connectionString).withFilter(new azure.ExponentialRetryPolicyFilter());
+    return azure.createBlobService(connectionString).withFilter(retryOperations);
 }
 
 // Calculate the base64 encoded MD5 hash of the file given (for validation against azure)
@@ -374,7 +382,8 @@ function getBlobs(blobService, blobContainer) {
 				verb: 'content-sync'
 			});
 		}
-		return blobService.listBlobs(blobContainer.name, processBlobs);
+        var prefixContentSet = { 'prefix': identifiedContentSet };
+		return blobService.listBlobs(blobContainer.name, prefixContentSet, processBlobs);
 	});
 };
 
@@ -394,9 +403,14 @@ function syncPackages() {
             }
 			// mark content sync as being active; thereby making content downloads unavailable
 			contentSyncActive = true;
-			for(var i=0;i < blobContainers.length; i++) {
-				getBlobs(blobService, blobContainers[i]);
-			}
+            /* Filter out containers to be included before further processing for blobs in each container */
+            var includeContainers = u.filter(blobContainers, function(item) {
+                    return this.keys.indexOf(item.name) > -1;
+                }, { "keys": config.includeDirectories }
+            );
+            for (var i = 0; i < includeContainers.length; i++) {
+                getBlobs(blobService, includeContainers[i]);
+            }
         });
     }
 };
@@ -429,28 +443,68 @@ function startBroadcast() {
 /* Start the application */
 logger.info("CCSoC Caching Server %s starting...",packageinfo.version);
 process.title = 'Pearson Caching Service';
-// Create the content directory
-mkdirp(contentDirectory, function (error) {
-    if (error) {
-		logger.error("CRITICAL: Failed to create content directory: "+error);
-		process.exit(-1);
-	}
-	// Start listening for client requests
-    startWebServer();
-	// Enable syncing if config allows it
-	if(config.syncInterval > 0) {
-		syncPackages();
-		setInterval(syncPackages,config.syncInterval);
-	}
-	else {
-		logger.warn("Not starting sync process because of config flag");
-	}
-	// start processing the download queue
-	setImmediate(downloadNextBlob);
-	// Start broadcasting zeroconf signal if enabled in config
-	if(config.enableBroadcast) {
-		startBroadcast();
-	} else {
-		logger.warn("Not starting zeroconf broadcast because of config flag");
-	}
+
+//Create a placeholder to store config code files
+var configCodeDir = config.configCodeSettings.relativeLocalPath;
+try {
+    mkdirp.sync(configCodeDir, 0755);
+} catch(err) {
+    logger.error("CRITICAL: Failed to create config code directory: " + err);
+    process.exit(1);
+}
+
+var configCodeFile = '';
+async.series([
+    function(callback) {
+        configCodeService.getConfigCodeDetails(config.environmentIdentifier,
+            path.join(__dirname , configCodeDir),
+            function(err, result) {
+                if (err) {
+                    return callback(err);
+                } else {
+                    configCodeFile = result;
+                    callback(null);
+                }
+            });
+    },
+    function(callback) {
+        configCodeService.getContentSetFromConfigCodeFile(configCodeFile, function(err, result) {
+            if (err) {
+                return callback(err);
+            } else {
+                identifiedContentSet = result;
+                callback(null);
+            }
+        });
+    }
+], function (ccError) {
+    if (ccError) {
+        logger.error("CRITICAL: Failed to retrieve config code settings and/or content set: " + ccError);
+        process.exit(-1);
+    } else {
+        // Create the content directory
+        mkdirp(contentDirectory, function(error) {
+            if (error) {
+                logger.error("CRITICAL: Failed to create content directory: " + error);
+                process.exit(-1);
+            }
+            // Start listening for client requests
+            startWebServer();
+            // Enable syncing if config allows it
+            if (config.syncInterval > 0) {
+                syncPackages();
+                setInterval(syncPackages, config.syncInterval);
+            } else {
+                logger.warn("Not starting sync process because of config flag");
+            }
+            // start processing the download queue
+            setImmediate(downloadNextBlob);
+            // Start broadcasting zeroconf signal if enabled in config
+            if (config.enableBroadcast) {
+                startBroadcast();
+            } else {
+                logger.warn("Not starting zeroconf broadcast because of config flag");
+            }
+        });
+    }
 });

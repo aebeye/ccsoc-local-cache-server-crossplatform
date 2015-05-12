@@ -18,6 +18,15 @@
     "mv": "~2.0.0",
     "getmac": "~1.0.6",
     "underscore": "~1.6.0",
-    "request": "~2.36.0"
+    "request": "~2.36.0",
+    "async": "^0.9.0"
+  },
+   "devDependencies": {
+     "assert": "^1.1.2",
+     "mocha": "^1.21.4",
+     "mockery": "^1.4.0",
+     "should": "^4.0.4",
+     "sinon": "^1.10.3",
+     "supertest": "^0.14.0"
   }
 }

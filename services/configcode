@@ -1,0 +1,58 @@
+'use strict';
+
+var path = require('path'),
+    fs = require('fs'),
+    request = require('request'),
+    config = require('../config.js');
+
+/* Retrieves config code file from the configuration blob and persist locally as a json file in current folder
+ * or relative folder if specified */
+exports.getConfigCodeDetails = function(environmentIdentifier, configCodeFolder, callback) {
+    if (!environmentIdentifier || environmentIdentifier.length === 0) {
+        var paramError = new Error('Fatal Error has occurred. Invalid environmentIdentifier: ' + environmentIdentifier);
+        callback(paramError);
+    }
+
+    var baseUri = config.configCodeSettings.blobBaseUri,
+        configCodeFileName = environmentIdentifier + '.json',
+        configCodeUrl = baseUri + configCodeFileName,
+        outputStream = path.join(configCodeFolder, configCodeFileName);
+
+    var writeStream = fs.createWriteStream(outputStream);
+    request(configCodeUrl).pipe(writeStream)
+        .on('finish', function() {
+            writeStream.end();
+            callback(null, outputStream);
+        })
+        .on('error', function(err) {
+            writeStream.close();
+            callback(err);
+        });
+};
+
+/* Extract Content Set from Config Code File */
+exports.getContentSetFromConfigCodeFile = function(configCodeFile, callback) {
+    try {
+        var contentSet = null;
+
+        if (!configCodeFile || configCodeFile.length === 0 || !fs.existsSync(configCodeFile)) {
+            var paramError = new Error('Fatal Error has occurred. Invalid configCodeFile: ' + configCodeFile);
+            return callback(paramError);
+        }
+        //return callback(null, 'test');
+        var data = JSON.parse(fs.readFileSync(configCodeFile, 'utf8'));
+        if (data) {
+            contentSet = data.contentSetIdentifier;
+        }
+
+        if (contentSet && contentSet.length !== 0) {
+            callback(null, contentSet);
+        } else {
+            var contentSetError = new Error('Fatal Error has occurred. Missing Content Set in Config Code File: ' + configCodeFile);
+            callback(contentSetError);
+        }
+
+    } catch (err) {
+        callback(err);
+    }
+};
