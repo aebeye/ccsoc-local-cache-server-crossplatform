@@ -405,7 +405,7 @@ function syncPackages() {
 			contentSyncActive = true;
             /* Filter out containers to be included before further processing for blobs in each container */
             var includeContainers = u.filter(blobContainers, function(item) {
-                    return this.keys.indexOf(item.name) > -1;
+                    return this.keys !== null && this.keys.indexOf(item.name) > -1;
                 }, { "keys": config.includeDirectories }
             );
             for (var i = 0; i < includeContainers.length; i++) {

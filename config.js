@@ -60,9 +60,9 @@ module.exports = {
     "configCodeSettings":
     {
         /* Blob uri to retrieve config code data as json file */
-        "blobBaseUri": "http://ccsoc.blob.core.windows.net/configuration/",
+        "blobBaseUri": "https://ccsoc.blob.core.windows.net/configuration/",
         /* Relative folder to store config code files streamed from blobBaseUri */
-        "relativeLocalPath": "configcode"
+        "relativeLocalPath": "config-code"
     },
     /* Settings related to exponential retry policy. Currently using default values */
     "exponentialRetry":
