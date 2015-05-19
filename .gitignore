@@ -7,3 +7,5 @@ Pearson Content Caching Service.pkg
 installer
 backup
 node_modules
+config-code
+.idea/*
