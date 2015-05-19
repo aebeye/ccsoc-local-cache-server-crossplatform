@@ -3,16 +3,24 @@ module.exports = {
 	 * This sets the regular expression against which azure container names are tested. If the container name matches
 	 * this pattern, the container is ignored for the purposes of syncing content. */
 	"excludeContainerPattern" : /mastercontent$/,
-    /* Array of azure container names to be included for content sync */
-    "includeDirectories": ["content", "half", "k1content"],
+    /* Array of azure container names for K2-12 to be included for content sync */
+    "k212IncludeDirectories": ["content", "half"],
+    /* Array of azure container names for K1 to be included for content sync */
+    "k1IncludeDirectories": ["k1content"],
+    /* Denotes subfolder inside Azure container indicated by config setting k1IncludeDirectories to retrieve k1 content
+     * This is only needed for K1 as this setting for K2-12 is initialized using content set retrieved from config code blob */
+    "k1PrefixContentSetFolder" : "K",
 	/* environmentIdentifier (string) : REQUIRED
 	 * This is the environment identifier, also known as the 'config code'. This affects the type of bonjour service that
 	 * is broadcast to the local network. The Pearson app will always look for the matching broadcast from the specified
 	 * config code in the app, so ensure you are broadcasting the correct config code or else your app will not pick it up. */
-	"environmentIdentifier" : "d6z9r8", // default/prod was d6z9r8
-	/* Azure Connection Details : REQUIRED */
-	"storageAccountName" : "ccsocwestrepo2",
-	"storageAccountSecret" : "TXsXgfl8iBHMlTdC1oQlJz1zMY2ppVVULL88/f0ukzf6KZOJ60jQArP20xD4cZzYF9K5bTDAuCfupOgyJioHgQ==",
+    "environmentIdentifier" : "ccsocdct", // default/prod was d6z9r8
+    /* Azure Connection Details for K2-12 : REQUIRED */
+    "k212StorageAccountName" : "pearsonccsocdct",
+    "k212StorageAccountSecret" : "+Sbk+6F/UtzKjaCIDZGveTV+dS7cDVzHb408OlFBqPyU5Y6GS3GBoMlYGwnOBAeg7wvXkmWEfELqtwDSs9pOJA==",
+    /* Azure Connection Details for K1 : REQUIRED */
+    "k1StorageAccountName" : "ccsocsndct",
+    "k1StorageAccountSecret" : "B5Kou+cND1ubVftjSXVXarlzJH6Ls4Zr0i0w9jDX0GDOWEhDkFtD9cq8fE8yJd0Ao63f6LhkW0gq87hZWzZR2A==",
 	/* port (int) : REQUIRED
 	 * This is the TCP port on which the webserver will listen for incoming connections. */
 	"port" : 8888,
