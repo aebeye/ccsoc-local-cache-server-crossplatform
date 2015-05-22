@@ -29,9 +29,7 @@ var downloadsRunning = [] // array of currently downloading blobs
     , identifiedContentSet = '00000000-0000-0000-0000-000000000000'
     , gradePackages = {K1 : "K1", K212: "K212"}
     , maincontentFolders = config.k212IncludeDirectories.concat(config.k1IncludeDirectories)
-    , gradeSpecificContentFolders = [];
-
-gradeSpecificContentFolders.push(config.k1PrefixContentSetFolder);
+    , gradeSpecificContentFolders = [config.k1PrefixContentSetFolder];
 
 // convert number of bytes into a more human readable format
 function humanFileSize(bytes, si) {
@@ -506,7 +504,6 @@ var traverseDirectory = function (dir, done) {
                         results = results.concat(res);
                         if (!--pending) done(null, results);
                     });
-                    var folderpath = path.dirname(file);
                     var foldername = path.basename(file);
 
                     var canKeep = false;
@@ -525,20 +522,10 @@ var traverseDirectory = function (dir, done) {
                         }
                     }
 
-                    /*
-                     if (file.match(contentSetIdentifier)) {
-                     logger.verbose(" contenset skip the foldername ='" + foldername + "' the file name = '" + file + "'");
-                     canKeep = true;
-                     }
-                     */
-
                     if (!canKeep) {
                         logger.verbose("Deleting the foldername ='" + foldername + "' the file name = '" + file + "'");
                         deleteFolderRecursive(file);
                     }
-
-                } else {
-                    // Not a directory
                 }
             });
         });
