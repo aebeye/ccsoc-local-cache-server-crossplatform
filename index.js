@@ -27,7 +27,9 @@ var downloadsRunning = [] // array of currently downloading blobs
     , downloadQueueSize = 0 // content length of items in queue
     , lastAzureDownloadSpeed = 0
     , identifiedContentSet = '00000000-0000-0000-0000-000000000000'
-    , gradePackages = {K1 : "K1", K212: "K212"};
+    , gradePackages = {K1 : "K1", K212: "K212"}
+    , maincontentFolders = config.k212IncludeDirectories.concat(config.k1IncludeDirectories)
+    , gradeSpecificContentFolders = [config.k1PrefixContentSetFolder];
 
 // convert number of bytes into a more human readable format
 function humanFileSize(bytes, si) {
@@ -461,6 +463,87 @@ function startBroadcast() {
     });
 }
 
+/*
+ deleteFolderRecursive:  Given file/directory path deletes it from local storage.
+ The directory delete is recursive as directory must be emptied before actual delete.
+ */
+var deleteFolderRecursive = function (dirPath) {
+    logger.info("Deleting: " + dirPath);
+    if (fs.existsSync(dirPath)) {
+        fs.readdirSync(dirPath).forEach(function (file, index) {
+            var curPath = dirPath + path.sep + file;
+            logger.verbose("curPath = " + curPath);
+            if (fs.lstatSync(curPath).isDirectory())
+            {
+                //Recursive
+                deleteFolderRecursive(curPath);
+            } else {
+                // delete file
+                fs.unlinkSync(curPath);
+                logger.verbose("deleted file " + curPath);
+            }
+        });
+        fs.rmdirSync(dirPath);
+        logger.info("Succesfully deleted: " + dirPath);
+    }
+};
+
+//  traverseDirectory :  This function traverses drectory path to determine what to keep and what should be deleted.
+var traverseDirectory = function (dir, done) {
+    var results = [];
+    fs.readdir(dir, function (err, list) {
+        if (err) return done(err);
+        var pending = list.length;
+        if (!pending) return done(null, results);
+        list.forEach(function (file) {
+            file = path.resolve(dir, file);
+            fs.stat(file, function (err, stat) {
+                if (stat && stat.isDirectory()) {
+
+                    traverseDirectory(file, function (err, res) {
+                        results = results.concat(res);
+                        if (!--pending) done(null, results);
+                    });
+                    var foldername = path.basename(file);
+
+                    var canKeep = false;
+
+                    for (var i = 0 ; i < maincontentFolders.length; i++) {
+                        if (foldername.match(maincontentFolders[i]) && (foldername.length == maincontentFolders[i].length)) {
+                            logger.verbose(i + "  Skipping the foldername ='" + foldername + "' the file name = '" + file + "'");
+                            canKeep = true;
+                        }
+                    }
+
+                    for (var i = 0 ; i < gradeSpecificContentFolders.length; i++) {
+                        if (file.match(gradeSpecificContentFolders[i]) && (file.length == gradeSpecificContentFolders[i].length)) {
+                            logger.verbose(i + "  Skipping the foldername ='" + foldername + "' the file name = '" + file + "'");
+                            canKeep = true;
+                        }
+                    }
+
+                    if (!canKeep) {
+                        logger.verbose("Deleting the foldername ='" + foldername + "' the file name = '" + file + "'");
+                        deleteFolderRecursive(file);
+                    }
+                }
+            });
+        });
+    });
+};
+
+/* Traverse Content Directory Structure recursively and delete any unwanted files and directories. */
+function cleanup() {
+    traverseDirectory(contentDirectory, function (err, results) {
+        if (err)
+        {
+            logger.info("Unable to Traverse Directory. An error occured: " + err);
+        }
+        logger.verbose(results);
+
+    });
+}
+
 /* Start the application */
 logger.info("CCSoC Caching Server %s starting...",packageinfo.version);
 process.title = 'Pearson Caching Service';
@@ -495,6 +578,7 @@ async.series([
                 return callback(err);
             } else {
                 identifiedContentSet = result;
+                gradeSpecificContentFolders.push(identifiedContentSet);
                 logger.info("Content Set identified: " + identifiedContentSet);
                 callback(null);
             }
@@ -533,6 +617,10 @@ async.series([
             } else {
                 logger.warn("Not starting zeroconf broadcast because of config flag");
             }
+
+            /* delete all local directories except main content folders (content, half and k1content)
+            and gradeSpecificContentFolders(content set and k1 related). */
+            cleanup();
         });
     }
 });
