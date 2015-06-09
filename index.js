@@ -1,3 +1,5 @@
+"use strict";
+
 var config = require(__dirname + '/config.js'),
     u = require('underscore'),
     express = require('express'),
@@ -5,7 +7,7 @@ var config = require(__dirname + '/config.js'),
     path = require('path'),
     azure = require('azure'),
     logger = require(path.join(__dirname, "logger.js")),
-    crypto = require('crypto'),
+    fileUtils = require(__dirname + '/services/fileUtils'),
     fs = require('fs'),
     util = require('util'),
     temp = require('temp'),
@@ -18,7 +20,9 @@ var config = require(__dirname + '/config.js'),
     packageinfo = require(path.join(__dirname, "package.json")),
     contentDirectory = path.join(__dirname, "content"),
     async = require('async'),
-    configCodeService = require(__dirname + '/services/configcode');
+    configCodeService = require(__dirname + '/services/configcode'),
+    bonjourService = require(__dirname + '/services/bonjourbroadcast'),
+    azureService = require(__dirname + '/services/azureblobservice');
 
 /* Global variables */
 var downloadsRunning = [] // array of currently downloading blobs
@@ -30,19 +34,6 @@ var downloadsRunning = [] // array of currently downloading blobs
     , gradePackages = {K1 : "K1", K212: "K212"}
     , maincontentFolders = config.k212IncludeDirectories.concat(config.k1IncludeDirectories)
     , gradeSpecificContentFolders = [config.k1PrefixContentSetFolder];
-
-// convert number of bytes into a more human readable format
-function humanFileSize(bytes, si) {
-    var thresh = si ? 1000 : 1024;
-    if(bytes < thresh) return bytes + ' B';
-    var units = si ? ['kB','MB','GB','TB','PB','EB','ZB','YB'] : ['KiB','MiB','GiB','TiB','PiB','EiB','ZiB','YiB'];
-    var u = -1;
-    do {
-        bytes /= thresh;
-        ++u;
-    } while(bytes >= thresh);
-    return bytes.toFixed(1)+' '+units[u];
-};
 
 // compares two 'download info' queue objects against each other based on the blob name and container name
 function compareBlobs(inputBlob) {
@@ -78,15 +69,15 @@ function startWebServer() {
                 'totals': {
                     'items-in-queue': downloadQueue.length,
                     'total-bytes': downloadQueueSize,
-                    'total-filesize': humanFileSize(downloadQueueSize,true),
+                    'total-filesize': fileUtils.readableFileSize(downloadQueueSize,true),
                     'current-download-count': downloadsRunning.length
                 },
                 'averages': {
-                    'file-size': humanFileSize((downloadQueueSize/downloadQueue.length) || 0 ,true)
+                    'file-size': fileUtils.readableFileSize((downloadQueueSize/downloadQueue.length) || 0 ,true)
                 },
-                'speed-of-last-transfer': humanFileSize(lastAzureDownloadSpeed,true)+"/sec",
+                'speed-of-last-transfer': fileUtils.readableFileSize(lastAzureDownloadSpeed,true)+"/sec",
                 'estimated-seconds-remaining': parseInt(((downloadQueueSize/lastAzureDownloadSpeed) || 0).toFixed(0)),
-                'currentDownloads': u.map(downloadsRunning,function(x) { return {'container':x.blobContainerName, 'name': x.blobName, 'size': humanFileSize(x.size,true) }; })
+                'currentDownloads': u.map(downloadsRunning,function(x) { return {'container':x.blobContainerName, 'name': x.blobName, 'size': fileUtils.readableFileSize(x.size,true) }; })
             }
         });
         logWebRequest(req,res);
@@ -165,24 +156,6 @@ function startWebServer() {
     app.listen(config.port);
 }
 
-/* Get a handle to the Azure blob service */
-function getBlobService(storageAccountName, storageAccountSecret) {
-    var connectionString;
-    var retryOperations = new azure.ExponentialRetryPolicyFilter(config.exponentialRetry.retryCount,
-        config.exponentialRetry.retryInterval,
-        config.exponentialRetry.minRetryInterval,
-        config.exponentialRetry.maxRetryInterval);
-    connectionString = "DefaultEndpointsProtocol=https;AccountName=" + storageAccountName + ";AccountKey=" + storageAccountSecret;
-    return azure.createBlobService(connectionString).withFilter(retryOperations);
-}
-
-// Calculate the base64 encoded MD5 hash of the file given (for validation against azure)
-function md5(filename) {
-    var sum = crypto.createHash('md5');
-    sum.update(fs.readFileSync(filename));
-    return sum.digest('base64');
-}
-
 // Continuous processing of the download queue
 function downloadNextBlob() {
     // queue the next download check call
@@ -214,9 +187,9 @@ function downloadNextBlob() {
         tempFilename = temp.path();
         var blobService;
         if (downloadInfo && downloadInfo.blobContainerName === config.k1IncludeDirectories[0]) {
-            blobService = getBlobService(config.k1StorageAccountName, config.k1StorageAccountSecret);
+            blobService = azureService.blobService(config.k1StorageAccountName, config.k1StorageAccountSecret);
         } else {
-            blobService = getBlobService(config.k212StorageAccountName, config.k212StorageAccountSecret);
+            blobService = azureService.blobService(config.k212StorageAccountName, config.k212StorageAccountSecret);
         }
 
         return blobService.getBlobProperties(downloadInfo.blobContainerName, downloadInfo.blobName, function (error, blobProperties, response) {
@@ -305,7 +278,7 @@ function downloadNextBlob() {
                             }
                             else {
                                 // now that the file has been downloaded, we need to validate its hash
-                                var hash = md5(tempFilename);
+                                var hash = fileUtils.md5(tempFilename);
                                 if (hash !== blobProperties.contentMD5) {
                                     // if the validation of the MD5 hash fails, delete the local copy and log an error
                                     logger.error("Hash mismatch.  Downloaded file had md5 hash: " + hash + " but expected hash was: " + blobProperties.contentMD5, {
@@ -409,9 +382,9 @@ function syncPackages(packageForGrade) {
     var blobService;
     //Initialize storage account information
     if (packageForGrade === gradePackages.K1) {
-        blobService = getBlobService(config.k1StorageAccountName, config.k1StorageAccountSecret);
+        blobService = azureService.blobService(config.k1StorageAccountName, config.k1StorageAccountSecret);
     } else {
-        blobService = getBlobService(config.k212StorageAccountName, config.k212StorageAccountSecret);
+        blobService = azureService.blobService(config.k212StorageAccountName, config.k212StorageAccountSecret);
     }
 
     // only run sync when there are no active NON-ON-DEMAND downloads
@@ -438,30 +411,6 @@ function syncPackages(packageForGrade) {
     }
 };
 
-// The main entry point for starting the zeroconf (bonjour) broadcast
-function startBroadcast() {
-    var bonjourServiceType = '_ccsoc-'+config.environmentIdentifier.toLowerCase()+'._tcp';
-    logger.info("Starting zeroconf (bonjour) broadcast for service "+bonjourServiceType);
-    // dns-sd is part of the Apple Bonjour SDK (available for windows and mac)
-    // the -R option registers a service
-    // dns-sd -R <Name> <Type> <Domain> <Port> [<TXT>...] (Register a service)
-    var txtRecord;
-    if(config.broadcastDetails) {
-        txtRecord = [
-                "VERSION="+packageinfo.version,
-                "OS_TYPE="+os.type(),
-                "OS_PLATFORM="+os.platform(),
-                "OS_ARCH="+os.arch()
-        ].join(" ");
-    } else {
-        txtRecord = "";
-    }
-    exec('dns-sd -R "CCSoC Cache Server" '+bonjourServiceType+' local '+config.port + " "+txtRecord, function(error, stdout, stderr) {
-        logger.error("Zeroconf (bonjour) stopped; will attempt to restart it after a brief timeout", {out: stdout, err: stderr});
-        // try to restart the broadcast in a little while if it stops for any reason
-        setTimeout(startBroadcast,10000);
-    });
-}
 
 /*
  deleteFolderRecursive:  Given file/directory path deletes it from local storage.
@@ -551,7 +500,7 @@ process.title = 'Pearson Caching Service';
 //Create a placeholder to store config code files
 var configCodeDir = path.join(__dirname, config.configCodeSettings.relativeLocalPath);
 try {
-    mkdirp.sync(configCodeDir, 0755);
+    mkdirp.sync(configCodeDir, 493);
     logger.info("Successfully created config code directory: " + configCodeDir);
 } catch (err) {
     logger.error("CRITICAL: Failed to create config code directory: " + configCodeDir + ". Error: " + err);
@@ -601,11 +550,12 @@ async.series([
             if (config.syncInterval > 0) {
 
                 //Syncing for K212
-                syncPackages(gradePackages.K212);
-                setInterval(function () { syncPackages(gradePackages.K212); }, config.syncInterval);
+                /* syncPackages(gradePackages.K212);
+                 setInterval(function () { syncPackages(gradePackages.K212); }, config.syncInterval);
+                 */
                 //Syncing for K1
                 syncPackages(gradePackages.K1);
-                setInterval(function () { syncPackages(gradePackages.K1); }, config.syncInterval);
+                //setInterval(function () { syncPackages(gradePackages.K1); }, config.syncInterval);
             } else {
                 logger.warn("Not starting sync process because of config flag");
             }
@@ -613,13 +563,13 @@ async.series([
             setImmediate(downloadNextBlob);
             // Start broadcasting zeroconf signal if enabled in config
             if (config.enableBroadcast) {
-                startBroadcast();
+                bonjourService.startBroadcast();
             } else {
                 logger.warn("Not starting zeroconf broadcast because of config flag");
             }
 
             /* delete all local directories except main content folders (content, half and k1content)
-            and gradeSpecificContentFolders(content set and k1 related). */
+             and gradeSpecificContentFolders(content set and k1 related). */
             cleanup();
         });
     }
